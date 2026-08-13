@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Sub-Account Created{% endblock %}
+{% block content %}
+<table class="grp5" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="msg1">Sub-account "{{ nickname }}" ({{ account_type }}) created successfully with an initial deposit of ${{ "%.2f"|format(deposit_amount) }}.</td></tr>
+  <tr><td><a href="/member/{{ member_id }}" class="lnk1">Return to Member Detail</a></td></tr>
+</table>
+{% endblock %}

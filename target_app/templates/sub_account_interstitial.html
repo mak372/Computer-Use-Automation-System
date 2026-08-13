@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Confirm Action{% endblock %}
+{% block content %}
+<table class="grp8" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="msg1">This member already has a similar account. Do you want to proceed with opening another one?</td></tr>
+  <tr>
+    <td>
+      <form action="/member/{{ member_id }}/sub-account/new" method="post" class="frm3">
+        <input type="hidden" name="account_type" value="{{ account_type }}">
+        <input type="hidden" name="nickname" value="{{ nickname }}">
+        <input type="hidden" name="deposit_amount" value="{{ deposit_amount }}">
+        <input type="hidden" name="interstitial_ack" value="1">
+        <button type="submit" class="btn1">Proceed</button>
+      </form>
+      <a href="/member/{{ member_id }}" class="lnk1">Cancel</a>
+    </td>
+  </tr>
+</table>
+{% endblock %}

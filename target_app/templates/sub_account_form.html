@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Open Sub-Account{% endblock %}
+{% block content %}
+{% if error %}
+<table class="grp7" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="err2">{{ error }}</td></tr>
+</table>
+{% endif %}
+<table class="grp6" cellpadding="3" cellspacing="0" border="0">
+  <tr>
+    <td>
+      <form action="/member/{{ member_id }}/sub-account/new" method="post" class="frm2">
+        <table cellpadding="3" cellspacing="0" border="0">
+          <tr>
+            <td>
+              <label>Account Type
+                <select name="account_type">
+                  <option value="savings" {% if account_type == "savings" %}selected{% endif %}>Savings</option>
+                  <option value="checking" {% if account_type == "checking" %}selected{% endif %}>Checking</option>
+                </select>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label>Nickname
+                <input type="text" name="nickname" value="{{ nickname or '' }}">
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label>Initial Deposit
+                <input type="text" name="deposit_amount" value="{{ deposit_amount or '' }}">
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td><button type="submit" class="btn1">Continue</button></td>
+          </tr>
+        </table>
+      </form>
+    </td>
+  </tr>
+</table>
+{% endblock %}

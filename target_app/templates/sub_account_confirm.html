@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Confirm Sub-Account{% endblock %}
+{% block content %}
+<table class="grp2" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="lbl2">Account Type</td><td class="val2">{{ account_type }}</td></tr>
+  <tr><td class="lbl2">Nickname</td><td class="val2">{{ nickname }}</td></tr>
+  <tr><td class="lbl2">Initial Deposit</td><td class="val2">${{ deposit_amount }}</td></tr>
+</table>
+<table class="grp6" cellpadding="3" cellspacing="0" border="0">
+  <tr>
+    <td>
+      <form action="/member/{{ member_id }}/sub-account/confirm" method="post" class="frm4">
+        <input type="hidden" name="account_type" value="{{ account_type }}">
+        <input type="hidden" name="nickname" value="{{ nickname }}">
+        <input type="hidden" name="deposit_amount" value="{{ deposit_amount }}">
+        <button type="submit" class="btn1">Confirm</button>
+      </form>
+    </td>
+  </tr>
+</table>
+{% endblock %}
