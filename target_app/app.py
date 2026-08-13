@@ -198,6 +198,24 @@ def withdraw_confirm(member_id):
     )
 
 
+@app.route("/member/<member_id>/contact/confirm", methods=["POST"])
+def contact_confirm(member_id):
+    # Unrelated widget sharing the withdraw-confirm page, deliberately
+    # using the same "Confirm" button role+name as the real withdrawal
+    # action. Exists to force real locator disambiguation rather than a
+    # trivially unique label - it must never be able to advance or affect
+    # the withdrawal flow.
+    member = get_member(member_id)
+    if member is None:
+        return render_template("member_not_found.html", member_id=member_id)
+
+    return render_template(
+        "message.html",
+        title="Contact Verified",
+        message="Contact information confirmed on file.",
+    )
+
+
 @app.route("/admin/delete-member/<member_id>", methods=["GET"])
 def admin_delete_member_confirm(member_id):
     return render_template("admin_delete_confirm.html", member_id=member_id)

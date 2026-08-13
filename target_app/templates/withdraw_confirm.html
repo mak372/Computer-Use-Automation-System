@@ -15,4 +15,15 @@
     </td>
   </tr>
 </table>
+<table class="grp10" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="lbl3">Contact Verification</td></tr>
+  <tr><td class="val3">Phone on file: 555-0142</td></tr>
+  <tr>
+    <td>
+      <form action="/member/{{ member.id }}/contact/confirm" method="post" class="frm7">
+        <button type="submit" class="btn1">Confirm</button>
+      </form>
+    </td>
+  </tr>
+</table>
 {% endblock %}
