@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Member Search{% endblock %}
+{% block content %}
+<table class="grp1" cellpadding="3" cellspacing="0" border="0">
+  <tr>
+    <td class="lbl1">
+      <form action="/lookup" method="get" class="frm1">
+        <label>Member ID
+          <input type="text" name="member_id" class="inp1">
+        </label>
+        <button type="submit" class="btn1">Search</button>
+      </form>
+    </td>
+  </tr>
+</table>
+{% endblock %}

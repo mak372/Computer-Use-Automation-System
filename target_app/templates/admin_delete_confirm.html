@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Delete Member{% endblock %}
+{% block content %}
+<table class="grp6" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="msg1">Delete member {{ member_id }}? This action cannot be undone.</td></tr>
+  <tr>
+    <td>
+      <form action="/admin/delete-member/{{ member_id }}" method="post">
+        <button type="submit" class="btn2">Delete</button>
+      </form>
+    </td>
+  </tr>
+</table>
+{% endblock %}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<title>{% block title %}Member Services{% endblock %}</title>
+<style>
+  body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; }
+  .wrap1 { border: 1px solid #888; }
+  .hdr1 { background: #003366; color: #fff; padding: 6px; }
+  .body1 { padding: 10px; }
+  table { border-collapse: collapse; }
+  td { padding: 3px 6px; }
+</style>
+</head>
+<body>
+<table class="wrap1" width="100%" cellpadding="4" cellspacing="0" border="0">
+  <tr>
+    <td class="hdr1">
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr><td class="hdr2">Member Services Console</td></tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td class="body1">
+      {% block content %}{% endblock %}
+    </td>
+  </tr>
+</table>
+</body>
+</html>
