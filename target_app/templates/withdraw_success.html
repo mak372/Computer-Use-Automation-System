@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Withdrawal Complete{% endblock %}
+{% block content %}
+<table class="grp5" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="msg1">Withdrawal of ${{ "%.2f"|format(amount) }} completed. Remaining balance: ${{ "%.2f"|format(balance) }}.</td></tr>
+  <tr><td><a href="/member/{{ member_id }}" class="lnk1">Return to Member Detail</a></td></tr>
+</table>
+{% endblock %}
