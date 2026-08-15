@@ -43,6 +43,7 @@ htmlcov/
 .coverage
 .env
 Assignment A — Computer-Use Automation System.pdf
+things to check before report.md
 .coverage.*
 .cache
 nosetests.xml
