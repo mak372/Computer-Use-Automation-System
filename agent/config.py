@@ -33,6 +33,15 @@ ALLOWED_ROUTES = [
     (r"^/member/[^/]+/withdraw/confirm$", {"POST"}),
 ]
 
+# Routes whose click carries a committed dollar amount and must go through
+# risk-tier evaluation before executing (the final "Confirm" actions only -
+# the earlier form POSTs are non-committal, just "continue to confirmation").
+# Maps (regex pattern, hidden field name holding the ground-truth amount).
+AMOUNT_BEARING_ROUTES = [
+    (r"^/member/[^/]+/withdraw/confirm$", "amount"),
+    (r"^/member/[^/]+/sub-account/confirm$", "deposit_amount"),
+]
+
 # --- Guardrails: risk tiering---
 # Applied uniformly to withdrawal amount and sub-account initial deposit.
 # amount < RISK_TIER_HITL_THRESHOLD -> auto-approved
