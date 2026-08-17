@@ -16,6 +16,16 @@
         <label>Amount
           <input type="text" name="amount" value="{{ amount or '' }}">
         </label>
+        <label>Withdrawal Method
+          <select name="method">
+            <option value="cash" {% if method == "cash" %}selected{% endif %}>Cash</option>
+            <option value="check" {% if method == "check" %}selected{% endif %}>Check</option>
+            <option value="transfer" {% if method == "transfer" or not method %}selected{% endif %}>Transfer</option>
+          </select>
+        </label>
+        <label>Memo
+          <input type="text" name="memo" value="{{ memo or '' }}">
+        </label>
         <button type="submit" class="btn1">Continue</button>
       </form>
     </td>

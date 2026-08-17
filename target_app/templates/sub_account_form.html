@@ -30,6 +30,17 @@
           </tr>
           <tr>
             <td>
+              <label>Branch
+                <select name="branch">
+                  <option value="main">Main Branch</option>
+                  <option value="downtown">Downtown Branch</option>
+                  <option value="airport">Airport Branch</option>
+                </select>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
               <label>Initial Deposit
                 <input type="text" name="deposit_amount" value="{{ deposit_amount or '' }}">
               </label>

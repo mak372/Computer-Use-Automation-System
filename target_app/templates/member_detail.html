@@ -5,6 +5,11 @@
   <tr><td class="lbl2">Name</td><td class="val2">{{ member.name }}</td></tr>
   <tr><td class="lbl2">Member ID</td><td class="val2">{{ member.id }}</td></tr>
   <tr><td class="lbl2">Balance</td><td class="val2">${{ "%.2f"|format(member.balance) }}</td></tr>
+  <tr><td class="lbl2">Account Status</td><td class="val2">{{ member.status }}</td></tr>
+  <tr><td class="lbl2">Email</td><td class="val2">{{ member.email }}</td></tr>
+  <tr><td class="lbl2">Phone</td><td class="val2">{{ member.phone }}</td></tr>
+  <tr><td class="lbl2">Branch</td><td class="val2">{{ member.branch }}</td></tr>
+  <tr><td class="lbl2">Member Since</td><td class="val2">{{ member.member_since }}</td></tr>
 </table>
 <table class="grp3" cellpadding="3" cellspacing="0" border="0">
   <tr>
@@ -12,7 +17,20 @@
     <td><a href="/member/{{ member.id }}/withdraw" class="lnk1">Withdraw/Transfer Funds</a></td>
   </tr>
 </table>
+<table class="grp3b" cellpadding="3" cellspacing="0" border="0">
+  <tr>
+    <td><a href="/member/{{ member.id }}/history" class="lnk2">View Transaction History</a></td>
+    <td><a href="/member/{{ member.id }}/statement" class="lnk2">Print Statement</a></td>
+    <td><a href="/member/{{ member.id }}/contact-info" class="lnk2">Update Contact Info</a></td>
+  </tr>
+</table>
 <table class="grp4" cellpadding="0" cellspacing="0" border="0">
   <tr><td><a href="/admin/delete-member/{{ member.id }}" class="lnk2">Admin: Delete Member</a></td></tr>
+</table>
+<table class="grp9" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="lbl3">Quick Links</td></tr>
+  <tr>
+    <td class="val3"><a href="/member/{{ member.id }}/history" class="lnk2">View Transaction History</a></td>
+  </tr>
 </table>
 {% endblock %}

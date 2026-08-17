@@ -55,21 +55,36 @@ def run_discovery(
     no_progress_count = 0
     run_start = time.monotonic()
     step_number = 0
+    # Both budgets can be extended, once per escalation, if a human resumes
+    # rather than aborts - otherwise "resume" would just immediately
+    # re-trigger the same budget-exhaustion escalation on the very next
+    # iteration, making resume meaningless for these two triggers.
+    max_steps_limit = config.MAX_STEPS
+    deadline = run_start + config.OVERALL_TIMEOUT_SECONDS
 
     while True:
         step_number += 1
 
-        if step_number > config.MAX_STEPS:
-            return _escalate_and_end(
-                logger, "max_steps_exhausted", {"max_steps": config.MAX_STEPS}, step_number - 1
+        if step_number > max_steps_limit:
+            result = _handle_escalation(
+                logger, page, goal_key, "max_steps_exhausted",
+                {"max_steps": max_steps_limit}, step_number - 1,
             )
-        if time.monotonic() - run_start > config.OVERALL_TIMEOUT_SECONDS:
-            return _escalate_and_end(
-                logger,
-                "overall_timeout",
-                {"timeout_seconds": config.OVERALL_TIMEOUT_SECONDS},
-                step_number - 1,
+            if result is not None:
+                return result
+            max_steps_limit += config.MAX_STEPS
+            no_progress_count, previous_fingerprint = 0, None
+            continue
+        if time.monotonic() > deadline:
+            result = _handle_escalation(
+                logger, page, goal_key, "overall_timeout",
+                {"timeout_seconds": config.OVERALL_TIMEOUT_SECONDS}, step_number - 1,
             )
+            if result is not None:
+                return result
+            deadline = time.monotonic() + config.OVERALL_TIMEOUT_SECONDS
+            no_progress_count, previous_fingerprint = 0, None
+            continue
 
         try:
             observation = build_observation(page)
@@ -158,12 +173,13 @@ def run_discovery(
                     observation.fingerprint, previous_fingerprint, no_progress_count
                 )
                 if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
-                    return _escalate_and_end(
-                        logger,
-                        "no_progress",
-                        {"consecutive_unchanged_steps": no_progress_count},
-                        step_number,
+                    escalation_result = _handle_escalation(
+                        logger, page, goal_key, "no_progress",
+                        {"consecutive_unchanged_steps": no_progress_count}, step_number,
                     )
+                    if escalation_result is not None:
+                        return escalation_result
+                    no_progress_count, previous_fingerprint = 0, None
                 continue
 
             _log_step(
@@ -198,9 +214,13 @@ def run_discovery(
                 screenshot_reason=screenshot_reason,
             )
             reasoning = redact(decision.args.get("reasoning", ""))
-            return _escalate_and_end(
-                logger, "llm_initiated", {"reasoning": reasoning}, step_number
+            result = _handle_escalation(
+                logger, page, goal_key, "llm_initiated", {"reasoning": reasoning}, step_number
             )
+            if result is not None:
+                return result
+            no_progress_count, previous_fingerprint = 0, None
+            continue
 
         # --- click / type / select ---
         index = decision.args.get("index")
@@ -230,12 +250,13 @@ def run_discovery(
                 observation.fingerprint, previous_fingerprint, no_progress_count
             )
             if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
-                return _escalate_and_end(
-                    logger,
-                    "no_progress",
-                    {"consecutive_unchanged_steps": no_progress_count},
-                    step_number,
+                escalation_result = _handle_escalation(
+                    logger, page, goal_key, "no_progress",
+                    {"consecutive_unchanged_steps": no_progress_count}, step_number,
                 )
+                if escalation_result is not None:
+                    return escalation_result
+                no_progress_count, previous_fingerprint = 0, None
             continue
 
         action_log["target"] = {
@@ -281,12 +302,13 @@ def run_discovery(
                 observation.fingerprint, previous_fingerprint, no_progress_count
             )
             if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
-                return _escalate_and_end(
-                    logger,
-                    "no_progress",
-                    {"consecutive_unchanged_steps": no_progress_count},
-                    step_number,
+                escalation_result = _handle_escalation(
+                    logger, page, goal_key, "no_progress",
+                    {"consecutive_unchanged_steps": no_progress_count}, step_number,
                 )
+                if escalation_result is not None:
+                    return escalation_result
+                no_progress_count, previous_fingerprint = 0, None
             continue
 
         hitl_event_id = None
@@ -314,7 +336,14 @@ def run_discovery(
                 hitl_event_id=hitl_event_id,
             )
             approved = operator.request_approval(
-                f'{decision.action} "{element.name}"', guardrail.amount, guardrail.reason
+                f'{decision.action} "{element.name}"',
+                guardrail.amount,
+                guardrail.reason,
+                goal_key=goal_key,
+                step_number=step_number,
+                screenshot_path=(
+                    str(logger.screenshot_path(step_number)) if screenshot_taken else None
+                ),
             )
             logger.log_hitl_event(
                 hitl_event_id=hitl_event_id,
@@ -330,12 +359,13 @@ def run_discovery(
                     observation.fingerprint, previous_fingerprint, no_progress_count
                 )
                 if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
-                    return _escalate_and_end(
-                        logger,
-                        "no_progress",
-                        {"consecutive_unchanged_steps": no_progress_count},
-                        step_number,
+                    escalation_result = _handle_escalation(
+                        logger, page, goal_key, "no_progress",
+                        {"consecutive_unchanged_steps": no_progress_count}, step_number,
                     )
+                    if escalation_result is not None:
+                        return escalation_result
+                    no_progress_count, previous_fingerprint = 0, None
                 continue
             # Resumed execution after approval is its own step event.
             step_number += 1
@@ -385,12 +415,13 @@ def run_discovery(
             new_fingerprint, previous_fingerprint, no_progress_count
         )
         if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
-            return _escalate_and_end(
-                logger,
-                "no_progress",
-                {"consecutive_unchanged_steps": no_progress_count},
-                step_number,
+            escalation_result = _handle_escalation(
+                logger, page, goal_key, "no_progress",
+                {"consecutive_unchanged_steps": no_progress_count}, step_number,
             )
+            if escalation_result is not None:
+                return escalation_result
+            no_progress_count, previous_fingerprint = 0, None
 
 
 def _maybe_screenshot(logger: RunLogger, page: Page, step_number: int, reasons: list[str]) -> Optional[str]:
@@ -443,24 +474,91 @@ def _log_step(
     )
 
 
-def _escalate_and_end(
-    logger: RunLogger, trigger: str, context: dict, total_steps: int
-) -> RunResult:
+def _handle_escalation(
+    logger: RunLogger,
+    page: Page,
+    goal_key: str,
+    trigger: str,
+    context: dict,
+    step_number: int,
+) -> Optional[RunResult]:
+    """Raises a real human-handoff event and blocks on a real decision.
+
+    Captures a before/after snapshot of the live page across the handoff
+    window - not a click-by-click recording of what the human did (out of
+    scope per the brief's own framing), but a real, if coarse, record of
+    what actually changed while they had control.
+
+    Returns `None` if the human resumed (the caller should reset its
+    no-progress tracking and continue the loop - the next iteration
+    re-observes the page fresh, so if the human already finished the goal
+    manually, the LLM will see the terminal state itself and go through
+    the same checkpoint verification as any other `finish` call - the
+    human's own claim of "done" is never trusted directly, consistent with
+    every other self-report in this system). Returns a terminal
+    `RunResult` if they aborted.
+    """
     hitl_event_id = secrets.token_hex(4)
+
+    try:
+        pre_observation: Optional[Observation] = build_observation(page)
+    except Exception:
+        pre_observation = None
+
+    screenshot_path = logger.screenshot_path(step_number)
+    try:
+        screenshot_path.write_bytes(capture_screenshot(page))
+    except Exception:
+        screenshot_path = None
+
     logger.log_hitl_event(
-        hitl_event_id=hitl_event_id, phase="raised", trigger=trigger, context=context
+        hitl_event_id=hitl_event_id,
+        phase="raised",
+        trigger=trigger,
+        context={
+            **context,
+            "pre_handoff_url": pre_observation.url if pre_observation else None,
+            "pre_handoff_fingerprint": pre_observation.fingerprint if pre_observation else None,
+        },
     )
-    resumed = operator.request_manual_handoff(trigger, context)
+
+    resumed = operator.request_manual_handoff(
+        trigger,
+        context,
+        goal_key=goal_key,
+        step_number=step_number,
+        screenshot_path=str(screenshot_path) if screenshot_path else None,
+    )
+
+    try:
+        post_observation: Optional[Observation] = build_observation(page)
+    except Exception:
+        post_observation = None
+    state_changed = (
+        pre_observation is not None
+        and post_observation is not None
+        and pre_observation.fingerprint != post_observation.fingerprint
+    )
+
     logger.log_hitl_event(
         hitl_event_id=hitl_event_id,
         phase="resolved",
         decision="resolved_manually" if resumed else "aborted",
         operator_id="local-operator",
+        context={
+            "post_handoff_url": post_observation.url if post_observation else None,
+            "post_handoff_fingerprint": post_observation.fingerprint if post_observation else None,
+            "state_changed_during_handoff": state_changed,
+        },
     )
-    logger.log_run_end(
-        outcome_type="escalated", outputs=None, checkpoint_verification=None, total_steps=total_steps
-    )
-    return RunResult("escalated", trigger, None, total_steps, logger.run_id)
+
+    if not resumed:
+        logger.log_run_end(
+            outcome_type="escalated", outputs=None, checkpoint_verification=None, total_steps=step_number
+        )
+        return RunResult("escalated", trigger, None, step_number, logger.run_id)
+
+    return None
 
 
 def _resolve_forced_fail(logger: RunLogger, reason: str, total_steps: int) -> RunResult:

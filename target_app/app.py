@@ -28,6 +28,15 @@ def lookup():
     return redirect(url_for("member_detail", member_id=member_id))
 
 
+@app.route("/advanced-search")
+def advanced_search():
+    return render_template(
+        "message.html",
+        title="Advanced Search",
+        message="Advanced search is not available in this environment.",
+    )
+
+
 @app.route("/member/<member_id>")
 def member_detail(member_id):
     member = get_member(member_id)
@@ -48,6 +57,45 @@ def member_detail(member_id):
         time.sleep(SLOW_DELAY_SECONDS)
 
     return render_template("member_detail.html", member=member)
+
+
+@app.route("/member/<member_id>/history")
+def member_history(member_id):
+    member = get_member(member_id)
+    if member is None:
+        return render_template("member_not_found.html", member_id=member_id)
+
+    return render_template(
+        "message.html",
+        title="Transaction History",
+        message="Transaction history is not available in this environment.",
+    )
+
+
+@app.route("/member/<member_id>/statement")
+def member_statement(member_id):
+    member = get_member(member_id)
+    if member is None:
+        return render_template("member_not_found.html", member_id=member_id)
+
+    return render_template(
+        "message.html",
+        title="Print Statement",
+        message="Statement printing is not available in this environment.",
+    )
+
+
+@app.route("/member/<member_id>/contact-info")
+def member_contact_info(member_id):
+    member = get_member(member_id)
+    if member is None:
+        return render_template("member_not_found.html", member_id=member_id)
+
+    return render_template(
+        "message.html",
+        title="Update Contact Info",
+        message="Contact info editing is not available in this environment.",
+    )
 
 
 @app.route("/member/<member_id>/sub-account/new", methods=["GET", "POST"])
@@ -159,6 +207,8 @@ def withdraw_new(member_id):
         return render_template("withdraw_form.html", member=member)
 
     amount_raw = request.form.get("amount", "").strip()
+    method = request.form.get("method", "transfer").strip()
+    memo = request.form.get("memo", "").strip()
 
     error = None
     amount = None
@@ -173,10 +223,17 @@ def withdraw_new(member_id):
 
     if error:
         return render_template(
-            "withdraw_form.html", member=member, error=error, amount=amount_raw
+            "withdraw_form.html",
+            member=member,
+            error=error,
+            amount=amount_raw,
+            method=method,
+            memo=memo,
         )
 
-    return render_template("withdraw_confirm.html", member=member, amount=amount)
+    return render_template(
+        "withdraw_confirm.html", member=member, amount=amount, method=method, memo=memo
+    )
 
 
 @app.route("/member/<member_id>/withdraw/confirm", methods=["POST"])
@@ -186,6 +243,8 @@ def withdraw_confirm(member_id):
         return render_template("member_not_found.html", member_id=member_id)
 
     amount = float(request.form.get("amount", "0"))
+    method = request.form.get("method", "transfer").strip()
+    memo = request.form.get("memo", "").strip()
 
     # Deliberately no amount-cap check here
     member.balance -= amount
@@ -195,6 +254,8 @@ def withdraw_confirm(member_id):
         member_id=member_id,
         amount=amount,
         balance=member.balance,
+        method=method,
+        memo=memo,
     )
 
 

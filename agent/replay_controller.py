@@ -376,6 +376,103 @@ def resolve_checkpoint(artifact: dict, goal_key: str, observation: Observation) 
     return CheckpointMatch(outcome_type=None, outcome_label=None)
 
 
+def _handle_unrecoverable(
+    page: Page,
+    logger: RunLogger,
+    goal_key: str,
+    artifact: dict,
+    step_index: int,
+    trigger: str,
+    context: dict,
+) -> Optional[CheckpointMatch]:
+    """Replay's equivalent of loop_controller._handle_escalation - a real
+    human handoff for the exact scenario the brief names explicitly ("a
+    replay hits a condition it can't recover from"). Called only after
+    every other recovery has already failed: resolve_checkpoint() matched
+    nothing at all against the artifact's full checkpoint set, whether
+    that's mid-run (drift, or execution failure surviving its one retry -
+    both reach this via _try_checkpoint_override) or at the very end of a
+    clean run that still landed somewhere unrecognized. Before this, replay
+    had no handoff path here at all - only the HITL-threshold approval gate
+    (operator.request_approval), which is a different mechanism (a yes/no
+    gate before automation acts, not a human taking manual control of a
+    stuck run).
+
+    Captures a before/after screenshot + observation across the handoff
+    window, same minimal-but-real "what changed while the human had
+    control" record discovery's own handler captures - not a click-by-click
+    trace, which is out of scope per the brief's own framing.
+
+    Returns None if the human aborted (caller finalizes as failed, as
+    before this existed). Returns a CheckpointMatch if they resumed - the
+    live page is re-checked against the same checkpoint set the rest of
+    this module already trusts, never the human's own claim of "done"
+    directly, same principle as every other self-report in this system. A
+    resumed handoff whose re-check still matches nothing (outcome_type
+    None) means the manual fix didn't land on a recognized state either -
+    the caller still finalizes as failed in that case, just now with real
+    evidence that a human looked at it first.
+    """
+    hitl_event_id = secrets.token_hex(4)
+
+    try:
+        pre_observation: Optional[Observation] = build_observation(page)
+    except Exception:
+        pre_observation = None
+
+    screenshot_path = logger.screenshot_path(step_index)
+    try:
+        screenshot_path.write_bytes(capture_screenshot(page))
+    except Exception:
+        screenshot_path = None
+
+    logger.log_hitl_event(
+        hitl_event_id=hitl_event_id,
+        phase="raised",
+        trigger=trigger,
+        context={
+            **context,
+            "pre_handoff_url": pre_observation.url if pre_observation else None,
+            "pre_handoff_fingerprint": pre_observation.fingerprint if pre_observation else None,
+        },
+    )
+
+    resumed = operator.request_manual_handoff(
+        trigger,
+        context,
+        goal_key=goal_key,
+        step_number=step_index,
+        screenshot_path=str(screenshot_path) if screenshot_path else None,
+    )
+
+    try:
+        post_observation: Optional[Observation] = build_observation(page)
+    except Exception:
+        post_observation = None
+    state_changed = (
+        pre_observation is not None
+        and post_observation is not None
+        and pre_observation.fingerprint != post_observation.fingerprint
+    )
+
+    logger.log_hitl_event(
+        hitl_event_id=hitl_event_id,
+        phase="resolved",
+        decision="resolved_manually" if resumed else "aborted",
+        operator_id="local-operator",
+        context={
+            "post_handoff_url": post_observation.url if post_observation else None,
+            "post_handoff_fingerprint": post_observation.fingerprint if post_observation else None,
+            "state_changed_during_handoff": state_changed,
+        },
+    )
+
+    if not resumed or post_observation is None:
+        return None
+
+    return resolve_checkpoint(artifact, goal_key, post_observation)
+
+
 def _guardrail_gate(
     element: InteractiveElement,
     page: Page,
@@ -535,7 +632,19 @@ def _try_checkpoint_override(
 
     match = resolve_checkpoint(artifact, goal_key, snapshot.observation)
     if match.outcome_type is None:
-        return None
+        # Every mechanical recovery has now failed (drift's relocation, or
+        # the bounded execution retry) and the checkpoint set still
+        # recognizes nothing - this is exactly "a condition replay can't
+        # recover from" on its own. Offer a real human handoff before
+        # finalizing as a failure.
+        handoff_match = _handle_unrecoverable(
+            page, logger, goal_key, artifact, step_index,
+            trigger="replay_unrecoverable",
+            context={"url": snapshot.observation.url},
+        )
+        if handoff_match is None or handoff_match.outcome_type is None:
+            return None
+        match = handoff_match
 
     return ReplayResult(
         outcome_type=match.outcome_type,
@@ -693,6 +802,24 @@ def run_replay(
     total_steps = len(artifact["steps"])
     final_observation = build_observation(page)
     match = resolve_checkpoint(artifact, goal_key, final_observation)
+
+    if match.outcome_type is None:
+        # Every recorded step executed successfully, but the final page
+        # still matches nothing in the checkpoint set - the same
+        # unrecoverable-condition scenario as the mid-run drift/execution-
+        # failure paths, just discovered only at the very end. Same real
+        # handoff before finalizing as checkpoint_drift.
+        handoff_match = _handle_unrecoverable(
+            page, logger, goal_key, artifact, total_steps,
+            trigger="replay_unrecoverable",
+            context={"url": final_observation.url},
+        )
+        if handoff_match is not None:
+            match = handoff_match
+            try:
+                final_observation = build_observation(page)
+            except Exception:
+                pass
 
     if match.outcome_type is not None:
         result = ReplayResult(
