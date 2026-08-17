@@ -10,13 +10,29 @@ exact-template regexes) rather than trusted from the LLM's own transcription.
 This same signature registry is what the artifact's checkpoint (Section
 3.2/3.3) will reuse for deterministic replay verification later.
 
-Deliberately excluded from every registry: form validation errors
-(recoverable - the agent corrects and retries, never a finish call), the
-similar-account interstitial (recoverable, agent clicks through it), and
-the "broken page" / system-error state (a hard failure the agent should
-escalate on, not report as a completed goal - leaving it unregistered
-means a finish() claiming it gets rejected, enforcing the business-outcome-
-vs-hard-failure distinction structurally rather than only via prompting).
+Deliberately excluded from every registry: form validation errors that
+are genuine data-entry mistakes (a malformed amount, a missing nickname)
+- recoverable, since any valid input fixes them, so the agent corrects
+and retries rather than calling finish. Also excluded: the similar-account
+interstitial (recoverable, agent clicks through it - not a terminal state
+at all), and the "broken page" / system-error state (a hard failure the
+agent should escalate on, not report as a completed goal - leaving it
+unregistered means a finish() claiming it gets rejected, enforcing the
+business-outcome-vs-hard-failure distinction structurally rather than
+only via prompting).
+
+`insufficient_funds` (withdraw_funds registry) is the one validation-
+error-shaped state that IS registered, and deliberately so: unlike a
+data-entry mistake (a malformed amount, a bad member ID format) which a
+human or an LLM could plausibly correct by retrying, insufficient funds
+is a fact about the account's real state that no retry - human or
+automated - can fix within this run. It is therefore a legitimate
+terminal business outcome for replay to report, exactly like
+member_not_found, rather than a recoverable condition. This distinction
+was sharpened after a real replay run hit exactly this state and, before
+this entry existed, misreported it as checkpoint/grounding drift - a
+misleading label implying the app had structurally changed, when it had
+behaved exactly as designed (see REPORT.md).
 """
 
 from __future__ import annotations
@@ -76,11 +92,23 @@ class OutcomeSpec:
     # referenced static-text strings, returns typed outputs, or raises
     # ValueError if the text doesn't actually match the expected shape.
     output_extractor: Optional[Callable[[list[str]], dict]] = None
+    # Declared return shape of output_extractor, e.g. {"balance": "number"}.
+    # Colocated with output_extractor (not a separate lookup table) so the
+    # two can't silently drift apart - this is the authoritative source for
+    # the artifact schema's `outputs` field (Section 3.2): the extractor's
+    # author already knows its real return types (e.g. deposit_amount is
+    # always float(...) in _extract_sub_account_created below, deliberately,
+    # not incidentally), so the artifact should read that declared shape
+    # rather than re-infer types from one recorded run's observed values.
+    output_schema: Optional[dict[str, str]] = None
 
 
 REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
     "lookup_balance": {
-        "success": OutcomeSpec(r"^/member/[^/]+$", "Balance", _extract_balance),
+        "success": OutcomeSpec(
+            r"^/member/[^/]+$", "Balance", _extract_balance,
+            output_schema={"balance": "number"},
+        ),
         "member_not_found": OutcomeSpec(r"^/member/[^/]+$", "No member found with ID"),
         "restricted": OutcomeSpec(r"^/member/[^/]+$", "This account is restricted"),
         "session_expired": OutcomeSpec(r"^/member/[^/]+$", "Your session has expired"),
@@ -90,6 +118,11 @@ REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
             r"^/member/[^/]+/sub-account/confirm$",
             "created successfully",
             _extract_sub_account_created,
+            output_schema={
+                "nickname": "string",
+                "account_type": "string",
+                "deposit_amount": "number",
+            },
         ),
         "member_not_found": OutcomeSpec(r"^/member/[^/]+$", "No member found with ID"),
         "restricted": OutcomeSpec(r"^/member/[^/]+$", "This account is restricted"),
@@ -104,10 +137,14 @@ REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
             r"^/member/[^/]+/withdraw/confirm$",
             "completed. Remaining balance",
             _extract_withdrawal_result,
+            output_schema={"remaining_balance": "number"},
         ),
         "member_not_found": OutcomeSpec(r"^/member/[^/]+$", "No member found with ID"),
         "restricted": OutcomeSpec(r"^/member/[^/]+$", "This account is restricted"),
         "session_expired": OutcomeSpec(r"^/member/[^/]+$", "Your session has expired"),
+        "insufficient_funds": OutcomeSpec(
+            r"^/member/[^/]+/withdraw$", "Insufficient funds for this withdrawal"
+        ),
     },
 }
 

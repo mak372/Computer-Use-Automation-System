@@ -13,11 +13,15 @@ control-transfer mechanics underneath it are real.
 from __future__ import annotations
 
 
-def request_approval(action_description: str, amount: float | None) -> bool:
+def request_approval(
+    action_description: str, amount: float | None, reason: str | None = None
+) -> bool:
     print("\n=== HUMAN APPROVAL REQUIRED ===")
     print(f"Action: {action_description}")
     if amount is not None:
         print(f"Amount: ${amount:,.2f}")
+    if reason:
+        print(f"Reason: {reason}")
     print("The live browser session is open for inspection.")
     response = input("Approve this action? [y/n]: ").strip().lower()
     return response == "y"

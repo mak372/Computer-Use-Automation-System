@@ -1,2 +1,0 @@
-{"event": "run_start", "run_id": "discovery-20260815-032808-cc02", "run_type": "discovery", "goal": "Look up member M-1001 and report their balance.", "target_url": "http://127.0.0.1:5000/", "model": "gemini-2.5-flash", "model_version": null, "logged_at": "2026-08-15T03:28:08.755572+00:00"}
-{"event": "run_end", "run_id": "discovery-20260815-032808-cc02", "outcome_type": "failed", "outputs": null, "checkpoint_verification": null, "total_steps": 0, "logged_at": "2026-08-15T03:28:09.259634+00:00"}

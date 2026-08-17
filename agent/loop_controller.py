@@ -42,7 +42,11 @@ def run_discovery(
     logger: RunLogger,
 ) -> RunResult:
     logger.log_run_start(
-        goal=goal, target_url=page.url, model=config.MODEL_NAME, model_version=None
+        goal=goal,
+        goal_key=goal_key,
+        target_url=page.url,
+        model=config.MODEL_NAME,
+        model_version=None,
     )
 
     system_instruction = llm_module.build_system_instruction(goal)
@@ -234,9 +238,25 @@ def run_discovery(
                 )
             continue
 
-        action_log["target"] = {"role": element.role, "name": element.name}
+        action_log["target"] = {
+            "role": element.role,
+            "name": element.name,
+            "nth": element.nth,
+            # (method, path) as resolved live at record time - not the
+            # safety-relevant value (guardrails re-derives ground truth
+            # itself), just the raw material artifact_builder.py needs to
+            # populate each step's grounding.expected_target.
+            "effective_target": element.effective_target,
+            # The app's own declared <input type>, textbox only - the
+            # authoritative seed for a parameter's draft type in
+            # artifact_builder.py. Must be logged, not just captured in
+            # perception.py's in-memory InteractiveElement, since the
+            # artifact builder only ever reads log.jsonl (decision: build
+            # post-hoc, not inline during the live run).
+            "html_input_type": element.html_input_type,
+        }
 
-        guardrail = evaluate_action(element, page)
+        guardrail = evaluate_action(element, page, goal=goal)
         guardrail_log = {
             "decision": guardrail.decision,
             "reason": guardrail.reason,
@@ -294,7 +314,7 @@ def run_discovery(
                 hitl_event_id=hitl_event_id,
             )
             approved = operator.request_approval(
-                f'{decision.action} "{element.name}"', guardrail.amount
+                f'{decision.action} "{element.name}"', guardrail.amount, guardrail.reason
             )
             logger.log_hitl_event(
                 hitl_event_id=hitl_event_id,

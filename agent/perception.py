@@ -29,6 +29,13 @@ class InteractiveElement:
     # resolvable; None if unresolvable (fail-closed in the guardrail layer)
     # or not applicable (textbox/combobox don't submit anything by themselves).
     effective_target: tuple[str, str] | None
+    # The underlying <input type="..."> attribute, textbox role only (None
+    # for combobox/<textarea>, which have no equivalent). A more authoritative
+    # source than shape-inferring a parameter's type from its one recorded
+    # value (see artifact_builder.py) - the app itself already declares
+    # "number" vs "text" here, so a draft type should be seeded from this
+    # first and only fall back to shape-inference when it's absent.
+    html_input_type: str | None
 
 
 @dataclass
@@ -86,6 +93,44 @@ def _resolve_button_target(locator: Locator) -> tuple[str, str] | None:
     return (form["method"], form["action"])
 
 
+def resolve_element_target(role: str, locator: Locator) -> tuple[tuple[str, str] | None, str | None]:
+    """Resolves (effective_target, html_input_type) for an already-located
+    element, without a full accessibility-tree walk - used by the replay
+    engine's fast relocation path (agent/replay_controller.py), which
+    addresses a step's element directly via get_by_role(...).nth(n) rather
+    than re-walking build_observation()'s full tree every step.
+
+    Button/textbox resolution is identical to _handle_node's (calls the
+    same _resolve_button_target / get_attribute("type")) - no duplicated
+    logic, so the two paths can't silently drift apart for those roles.
+    Link resolution here reads the raw `href` attribute directly instead of
+    the walk's aria_snapshot-derived `/url` metadata; both are expected to
+    agree for this app's plain server-rendered relative hrefs (no
+    client-side URL rewriting), but that hasn't been proven identical by
+    construction the way button/textbox resolution has - worth a real
+    spot-check the first time replay exercises a link-type step.
+    """
+    html_input_type = None
+    if role == "textbox":
+        try:
+            html_input_type = locator.get_attribute("type")
+        except Exception:
+            html_input_type = None
+
+    if role == "link":
+        try:
+            href = locator.get_attribute("href")
+        except Exception:
+            href = None
+        effective_target = ("GET", href) if href else None
+    elif role == "button":
+        effective_target = _resolve_button_target(locator)
+    else:
+        effective_target = None
+
+    return effective_target, html_input_type
+
+
 def _split_children(children: list) -> tuple[dict[str, str], list]:
     """Separates a node's YAML children into (metadata, real_child_nodes).
     Metadata is Playwright's own convention for keys like "/url" (a link's
@@ -132,6 +177,13 @@ def _handle_node(
             except Exception:
                 value = None
 
+        html_input_type = None
+        if role == "textbox":
+            try:
+                html_input_type = locator.get_attribute("type")
+            except Exception:
+                html_input_type = None
+
         if role == "link":
             href = metadata.get("url")
             effective_target = ("GET", href) if href else None
@@ -150,6 +202,7 @@ def _handle_node(
                 preceding_context=last_static[-1] if last_static else "",
                 value=value,
                 effective_target=effective_target,
+                html_input_type=html_input_type,
             )
         )
         # Deliberately not recursing into an interactive node's own

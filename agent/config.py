@@ -79,3 +79,8 @@ RISK_TIER_HITL_THRESHOLD = 10000
 
 # --- Evidence / logging---
 EVIDENCE_DIR = "evidence"
+
+# --- Artifacts (Section 3.2) ---
+# One canonical file per capability, artifacts/{goal_key}.json, overwritten
+# on rebuild - git history is the version history, not multiple on-disk files.
+ARTIFACTS_DIR = "artifacts"

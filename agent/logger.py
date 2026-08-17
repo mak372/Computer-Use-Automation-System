@@ -82,7 +82,12 @@ class RunLogger:
         return self.dir / f"step_{step_number}.png"
 
     def log_run_start(
-        self, goal: str, target_url: str, model: str, model_version: str | None
+        self,
+        goal: str,
+        goal_key: str,
+        target_url: str,
+        model: str,
+        model_version: str | None,
     ) -> None:
         self._write(
             {
@@ -90,6 +95,11 @@ class RunLogger:
                 "run_id": self.run_id,
                 "run_type": self.run_type,
                 "goal": goal,
+                # checkpoints.REGISTRIES key - not derivable from `goal`
+                # (free-form NL text) alone. Needed so artifact_builder.py
+                # can look up the right registry entry from log.jsonl
+                # without any input beyond the log itself.
+                "goal_key": goal_key,
                 "target_url": target_url,
                 "model": model,
                 "model_version": model_version,
