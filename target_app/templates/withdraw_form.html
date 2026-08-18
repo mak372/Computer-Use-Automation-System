@@ -26,7 +26,7 @@
         <label>Memo
           <input type="text" name="memo" value="{{ memo or '' }}">
         </label>
-        <button type="submit" class="btn1">Continue</button>
+        <button type="submit" class="btn1"{% if member.flagged_for_review %} onclick="return confirm('This member\'s record was recently flagged for review. Continue with this withdrawal?')"{% endif %}>Continue</button>
       </form>
     </td>
   </tr>

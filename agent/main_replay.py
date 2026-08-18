@@ -17,7 +17,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-from agent import config
+from agent import config, operator_ui
 from agent.checkpoints import REGISTRIES
 from agent.logger import RunLogger
 from agent.replay_controller import (
@@ -78,6 +78,9 @@ def main() -> int:
     except (ReplayValidationError, FileNotFoundError) as exc:
         print(f"Replay refused before starting: {exc}", file=sys.stderr)
         return 1
+
+    # Eager start (not lazy-on-first-escalation) - see main.py for why.
+    operator_ui.ensure_started()
 
     result = None
     with sync_playwright() as playwright:

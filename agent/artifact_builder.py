@@ -321,6 +321,42 @@ def build_artifact(
     }
 
 
+def save_artifact(
+    artifact: dict,
+    goal_key: str,
+    repo_root: Path | None = None,
+    force: bool = False,
+) -> tuple[Path, bool]:
+    """Writes artifact to artifacts/{goal_key}.json, unless an artifact
+    already there is status: "reviewed" and force is False - a reviewed
+    artifact represents completed human review work (decision #4/#12) that
+    an automatic rebuild (main.py, after every successful discovery run)
+    must not silently discard back to draft. A "draft" or missing artifact
+    is always safe to (over)write, since nothing has reviewed it yet.
+
+    force=True is for a deliberate, explicit rebuild - the manual CLI below
+    always passes it, since typing the exact `run_id --goal-key` command *is*
+    the deliberate human action the guard exists to require; only main.py's
+    automatic post-success call uses the default (force=False), since that's
+    the call site with no human in the loop to have decided anything.
+    Returns (path, written) - written is False when the skip fired."""
+    repo_root = repo_root or Path.cwd()
+    out_dir = repo_root / config.ARTIFACTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{goal_key}.json"
+
+    if out_path.exists() and not force:
+        try:
+            existing = json.loads(out_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+        if existing.get("status") == "reviewed":
+            return out_path, False
+
+    out_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    return out_path, True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build a versioned artifact from a successful discovery run's evidence log."
@@ -335,11 +371,9 @@ def main() -> None:
     artifact = build_artifact(
         args.run_id, args.goal_key, capability_version=args.capability_version
     )
-
-    out_dir = Path.cwd() / config.ARTIFACTS_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{args.goal_key}.json"
-    out_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    # force=True: running this CLI with an explicit run_id/goal_key already
+    # is the deliberate rebuild - see save_artifact()'s docstring.
+    out_path, _ = save_artifact(artifact, args.goal_key, force=True)
     print(f"wrote {out_path} (built_from_degraded_log={artifact['built_from_degraded_log']})")
 
 

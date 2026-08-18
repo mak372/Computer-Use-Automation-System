@@ -48,7 +48,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Page
 
-from agent import artifact_builder, checkpoints, config, operator
+from agent import artifact_builder, checkpoints, config, dialogs, interstitials, operator
 from agent.action_executor import execute_action
 from agent.guardrails import evaluate_action
 from agent.logger import RunLogger
@@ -57,6 +57,7 @@ from agent.perception import (
     Observation,
     build_observation,
     capture_screenshot,
+    diff_observations,
     resolve_element_target,
 )
 
@@ -449,11 +450,6 @@ def _handle_unrecoverable(
         post_observation: Optional[Observation] = build_observation(page)
     except Exception:
         post_observation = None
-    state_changed = (
-        pre_observation is not None
-        and post_observation is not None
-        and pre_observation.fingerprint != post_observation.fingerprint
-    )
 
     logger.log_hitl_event(
         hitl_event_id=hitl_event_id,
@@ -463,7 +459,10 @@ def _handle_unrecoverable(
         context={
             "post_handoff_url": post_observation.url if post_observation else None,
             "post_handoff_fingerprint": post_observation.fingerprint if post_observation else None,
-            "state_changed_during_handoff": state_changed,
+            # Section 3.6's "record what the human did" - see
+            # perception.diff_observations' docstring for why this is a
+            # state diff, not an action log.
+            "handoff_diff": diff_observations(pre_observation, post_observation),
         },
     )
 
@@ -484,7 +483,11 @@ def _guardrail_gate(
     """Returns (guardrail_decision, terminal_result_or_None, just_approved).
     Always re-evaluates the guardrail live against the current page (never
     trust a stale check, same rule guardrails.py itself already follows for
-    the amount field).
+    the amount field) - and, after an approval is actually granted, re-runs
+    that same check one more time before reporting success, in case the
+    live session changed during the (arbitrarily long) approval wait. See
+    the re-check inline below for why that second pass is load-bearing, not
+    redundant.
 
     skip_hitl_prompt must only be True when the CALLER has already recorded
     a real approval for this exact step_index earlier this run - it is not
@@ -541,6 +544,51 @@ def _guardrail_gate(
                 expected=None,
                 observed="human denied approval",
             ), False
+
+        # Re-verify nothing changed underneath the approval before acting
+        # on it - request_approval() blocks for an arbitrary amount of
+        # time, during which a human can (by design, this is the real
+        # handoff mechanism) freely navigate the SAME live session.
+        # `guardrail` was evaluated before that wait; re-running the same
+        # check the docstring above already promises ("always re-evaluates
+        # ... never trust a stale check") closes the one point it didn't
+        # actually cover yet. A live incident during discovery testing
+        # (not hypothetical) showed exactly this shape: a human approved a
+        # $12,000 withdrawal, changed the live amount to $5,000 while the
+        # prompt was still pending, and a stale approval would have
+        # executed the $5,000 submission that was never itself approved.
+        fresh_guardrail = evaluate_action(element, page)
+        approval_still_valid = fresh_guardrail.decision == guardrail.decision and (
+            (fresh_guardrail.amount is None and guardrail.amount is None)
+            or (
+                fresh_guardrail.amount is not None
+                and guardrail.amount is not None
+                and abs(fresh_guardrail.amount - guardrail.amount) < 0.01
+            )
+        )
+        if not approval_still_valid:
+            logger.log_hitl_event(
+                hitl_event_id=hitl_event_id,
+                phase="stale_after_approval",
+                trigger="live_state_changed_during_approval_wait",
+                context={
+                    "approved_decision": guardrail.decision,
+                    "approved_amount": guardrail.amount,
+                    "live_decision": fresh_guardrail.decision,
+                    "live_amount": fresh_guardrail.amount,
+                },
+            )
+            return fresh_guardrail, ReplayResult(
+                outcome_type="escalated",
+                outcome_label="stale_approval",
+                outputs=None,
+                total_steps=step_index,
+                run_id=logger.run_id,
+                failed_at_step=step_index,
+                expected=f"{guardrail.decision} at ${guardrail.amount}",
+                observed=f"live state is now {fresh_guardrail.decision} at ${fresh_guardrail.amount}",
+            ), False
+
         return guardrail, None, True
 
     return guardrail, None, False
@@ -655,6 +703,95 @@ def _try_checkpoint_override(
     )
 
 
+def _try_dismiss_known_interstitial(
+    page: Page,
+    logger: RunLogger,
+    goal_key: str,
+    step: dict,
+    bound_params: dict[str, str],
+    step_index: int,
+) -> Optional[InteractiveElement]:
+    """Section 3.3's "recoverable condition: dismiss a known interstitial."
+    Called only after a step's recorded grounding has already failed to
+    resolve - never on the happy path. Checks the live page against this
+    goal's registered interstitial signatures (interstitials.py) and, on
+    exactly one match, clicks the registered dismiss control and re-attempts
+    the ORIGINAL step's relocation against the resulting page.
+
+    Fail-closed like every other matcher in this system (see interstitials.
+    py's docstring): zero matches returns None silently - the caller's
+    existing unrecoverable path handles that exactly as before. Multiple
+    matches is logged explicitly as an ambiguity, then also returns None -
+    never guess between two registered interstitials.
+
+    Returns the relocated element only if dismissing actually led back to
+    where the original step expected to be; otherwise returns None and lets
+    the caller's existing checkpoint-override/unrecoverable path run
+    unchanged - a known interstitial that doesn't lead where expected must
+    still fail closed, not get silently swallowed.
+    """
+    try:
+        observation = build_observation(page)
+    except Exception:
+        return None
+
+    candidates = interstitials.find_candidates(goal_key, observation)
+    if len(candidates) == 0:
+        return None
+    if len(candidates) > 1:
+        logger.log_step(
+            step_number=step_index,
+            observation_summary={
+                "url": observation.url,
+                "ambiguous_interstitial_count": len(candidates),
+            },
+            action={"diagnostic": "ambiguous_known_interstitial_match"},
+            guardrail_result={"decision": "not_applicable"},
+            execution_result="ambiguous_interstitial_not_dismissed",
+            state_fingerprint=observation.fingerprint,
+        )
+        return None
+
+    spec = candidates[0]
+    dismiss_locator = page.get_by_role(spec.dismiss_role, name=spec.dismiss_name, exact=True)
+    if dismiss_locator.count() != 1:
+        return None
+
+    # Screenshot the interstitial itself before dismissing it - same
+    # "abnormal-but-handled event deserves visual evidence" discipline as
+    # _try_checkpoint_override's diagnostic capture.
+    screenshot_reason = None
+    try:
+        path = logger.screenshot_path(step_index)
+        path.write_bytes(capture_screenshot(page))
+        screenshot_reason = "known_interstitial"
+    except Exception:
+        screenshot_reason = None
+
+    try:
+        dismiss_locator.click(timeout=config.ACTION_TIMEOUT_SECONDS * 1000)
+    except Exception:
+        return None
+
+    logger.log_step(
+        step_number=step_index,
+        observation_summary={
+            "interstitial_url": observation.url,
+            "dismiss_role": spec.dismiss_role,
+            "dismiss_name": spec.dismiss_name,
+            "screenshot_path": (f"step_{step_index}.png" if screenshot_reason else None),
+            "screenshot_reason": screenshot_reason,
+        },
+        action={"recovered_known_interstitial": True, "step_index": step_index},
+        guardrail_result={"decision": "not_applicable"},
+        execution_result="known_interstitial_dismissed",
+        state_fingerprint="",
+    )
+
+    relocation = relocate_step_element(page, step, bound_params)
+    return relocation.element if relocation.drift is None else None
+
+
 def _locate_or_terminal(
     page: Page,
     logger: RunLogger,
@@ -667,6 +804,12 @@ def _locate_or_terminal(
     relocation = relocate_step_element(page, step, bound_params)
     if relocation.drift is None:
         return relocation.element, None
+
+    recovered_element = _try_dismiss_known_interstitial(
+        page, logger, goal_key, step, bound_params, step_index
+    )
+    if recovered_element is not None:
+        return recovered_element, None
 
     override = _try_checkpoint_override(page, logger, artifact, goal_key, relocation.element, step_index)
     if override is not None:
@@ -777,6 +920,8 @@ def run_replay(
     artifact = load_artifact(goal_key, repo_root)
     validate_artifact_preflight(artifact, expected_capability_version)
     bound_params = bind_parameters(artifact, parameters)
+
+    dialogs.install_dialog_handler(page, goal_key, logger)
 
     logger.log_run_start(
         goal=f"Replay of artifact '{goal_key}' (capability_version={artifact['capability_version']})",

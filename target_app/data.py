@@ -29,6 +29,7 @@ class Member:
     force_timeout: bool = False
     similar_account_exists: bool = False
     broken: bool = False
+    flagged_for_review: bool = False
     email: str = ""
     phone: str = ""
     branch: str = ""
@@ -85,6 +86,12 @@ def _seed() -> dict:
             broken=True,
             email="broken.test@example.com", phone="555-0199",
             branch="Main Branch", member_since="2021-02-27",
+        ),
+        "M-1010": Member(
+            id="M-1010", name="Grace Nolan", status="active", balance=8000.00,
+            flagged_for_review=True,
+            email="grace.nolan@example.com", phone="555-0110",
+            branch="Main Branch", member_since="2017-08-09",
         ),
     }
 

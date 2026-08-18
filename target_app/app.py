@@ -25,6 +25,10 @@ def search():
 @app.route("/lookup")
 def lookup():
     member_id = request.args.get("member_id", "").strip()
+    if not member_id:
+        return render_template(
+            "search.html", error="Please enter a Member ID.", member_id=member_id
+        )
     return redirect(url_for("member_detail", member_id=member_id))
 
 

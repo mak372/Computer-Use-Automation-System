@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Member Search{% endblock %}
 {% block content %}
+{% if error %}
+<table class="grp7" cellpadding="3" cellspacing="0" border="0">
+  <tr><td class="err2">{{ error }}</td></tr>
+</table>
+{% endif %}
 <table class="grp1" cellpadding="3" cellspacing="0" border="0">
   <tr>
     <td class="lbl1">
       <form action="/lookup" method="get" class="frm1">
         <label>Member ID
-          <input type="text" name="member_id" class="inp1">
+          <input type="text" name="member_id" class="inp1" value="{{ member_id or '' }}">
         </label>
         <label>Search by Name
           <input type="text" name="name_query" class="inp1">

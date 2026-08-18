@@ -18,7 +18,8 @@ import sys
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from agent import config
+from agent import config, operator_ui
+from agent.artifact_builder import build_artifact, save_artifact
 from agent.checkpoints import REGISTRIES
 from agent.llm_client import LLMClient
 from agent.logger import RunLogger
@@ -51,6 +52,13 @@ def main() -> int:
 
     client = LLMClient(api_key=api_key)
 
+    # Eager start (not lazy-on-first-escalation): the console must be
+    # reachable the moment this process starts, same as target_app's port
+    # being live the instant it's run - opening the tab before any
+    # escalation happens should show "no action needed", never a
+    # connection error.
+    operator_ui.ensure_started()
+
     result = None
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
@@ -80,6 +88,34 @@ def main() -> int:
     if result.outputs:
         print(f"Outputs: {result.outputs}")
     print(f"Evidence: {config.EVIDENCE_DIR}/{result.run_id}/")
+
+    if result.outcome_type == "success":
+        # Section 3.2: "after a successful run, emit ... an artifact" -
+        # automatic, not a separate manual step a human has to remember to
+        # run. build_artifact() itself stays post-hoc/decoupled (reads only
+        # the already-persisted log.jsonl, per decision #1) so a bug here
+        # can't corrupt or invalidate the discovery run that already
+        # succeeded and was already logged - only this auto-save step is
+        # new, wrapped so its failure surfaces as a warning, not a crash.
+        try:
+            artifact = build_artifact(result.run_id, args.goal_key)
+            out_path, written = save_artifact(artifact, args.goal_key)
+            if written:
+                print(f"[artifact_builder] wrote {out_path} (status: draft, pending human review)")
+            else:
+                print(
+                    f"[artifact_builder] {out_path} already exists with status='reviewed' - "
+                    f"skipping auto-build. Run `python -m agent.artifact_builder "
+                    f"{result.run_id} --goal-key {args.goal_key}` explicitly if you intend "
+                    f"to rebuild it."
+                )
+        except Exception as exc:
+            print(
+                f"[artifact_builder] ERROR: discovery run succeeded but artifact build "
+                f"failed - no artifact was saved for goal_key={args.goal_key!r}, "
+                f"run_id={result.run_id!r}: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
 
     return 0
 

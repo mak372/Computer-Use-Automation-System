@@ -80,6 +80,13 @@ RISK_TIER_HITL_THRESHOLD = 10000
 # --- Evidence / logging---
 EVIDENCE_DIR = "evidence"
 
+# --- HITL operator console (Section 3.6) ---
+# Local-only web console for approving/resolving escalations - a second,
+# additive surface alongside the terminal prompt (operator.py), never a
+# replacement for it. See operator.py's module docstring for the
+# race-to-first-response mechanism.
+OPERATOR_UI_PORT = 5050
+
 # --- Artifacts (Section 3.2) ---
 # One canonical file per capability, artifacts/{goal_key}.json, overwritten
 # on rebuild - git history is the version history, not multiple on-disk files.

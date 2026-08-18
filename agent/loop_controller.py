@@ -17,12 +17,12 @@ from typing import Optional
 
 from playwright.sync_api import Page
 
-from agent import checkpoints, config, operator
+from agent import checkpoints, config, dialogs, operator
 from agent import llm_client as llm_module
 from agent.action_executor import execute_action
 from agent.guardrails import evaluate_action
 from agent.logger import RunLogger, redact
-from agent.perception import Observation, build_observation, capture_screenshot
+from agent.perception import Observation, build_observation, capture_screenshot, diff_observations
 
 
 @dataclass
@@ -41,6 +41,8 @@ def run_discovery(
     client: llm_module.LLMClient,
     logger: RunLogger,
 ) -> RunResult:
+    dialogs.install_dialog_handler(page, goal_key, logger)
+
     logger.log_run_start(
         goal=goal,
         goal_key=goal_key,
@@ -367,6 +369,65 @@ def run_discovery(
                         return escalation_result
                     no_progress_count, previous_fingerprint = 0, None
                 continue
+
+            # Re-verify nothing changed underneath the approval before
+            # acting on it. request_approval() blocks for an arbitrary
+            # amount of time, during which a human can - by design, this
+            # is the real handoff mechanism - freely navigate the SAME
+            # live session. `element`/`guardrail` were captured before
+            # that wait; a live re-query of the button the human approved
+            # can now resolve against completely different page state
+            # (e.g. a different amount someone typed while the approval
+            # was pending). Re-running the exact check that gated this
+            # action in the first place is the same "never trust a stale
+            # value, read live" principle guardrails.py already applies to
+            # the amount field itself - applied here at the one point that
+            # principle didn't yet cover. A live incident during testing
+            # (not hypothetical) showed exactly this: a human approved a
+            # $12,000 withdrawal, manually changed the live amount to
+            # $5,000 while the approval prompt was still pending, and the
+            # stale approval executed a real $5,000 withdrawal that was
+            # never itself approved.
+            fresh_guardrail = evaluate_action(element, page, goal=goal)
+            approval_still_valid = fresh_guardrail.decision == guardrail.decision and (
+                (fresh_guardrail.amount is None and guardrail.amount is None)
+                or (
+                    fresh_guardrail.amount is not None
+                    and guardrail.amount is not None
+                    and abs(fresh_guardrail.amount - guardrail.amount) < 0.01
+                )
+            )
+            if not approval_still_valid:
+                logger.log_hitl_event(
+                    hitl_event_id=hitl_event_id,
+                    phase="stale_after_approval",
+                    trigger="live_state_changed_during_approval_wait",
+                    context={
+                        "approved_decision": guardrail.decision,
+                        "approved_amount": guardrail.amount,
+                        "live_decision": fresh_guardrail.decision,
+                        "live_amount": fresh_guardrail.amount,
+                    },
+                )
+                history_lines.append(
+                    f'Step {step_number}: {decision.action} "{element.name}" -> refused: '
+                    f"approved {guardrail.decision} (${guardrail.amount}) no longer matches "
+                    f"live state ({fresh_guardrail.decision}, ${fresh_guardrail.amount}) - "
+                    "not executing a stale approval"
+                )
+                no_progress_count, previous_fingerprint = _track_fingerprint(
+                    observation.fingerprint, previous_fingerprint, no_progress_count
+                )
+                if no_progress_count >= config.NO_PROGRESS_THRESHOLD:
+                    escalation_result = _handle_escalation(
+                        logger, page, goal_key, "no_progress",
+                        {"consecutive_unchanged_steps": no_progress_count}, step_number,
+                    )
+                    if escalation_result is not None:
+                        return escalation_result
+                    no_progress_count, previous_fingerprint = 0, None
+                continue
+
             # Resumed execution after approval is its own step event.
             step_number += 1
 
@@ -534,11 +595,6 @@ def _handle_escalation(
         post_observation: Optional[Observation] = build_observation(page)
     except Exception:
         post_observation = None
-    state_changed = (
-        pre_observation is not None
-        and post_observation is not None
-        and pre_observation.fingerprint != post_observation.fingerprint
-    )
 
     logger.log_hitl_event(
         hitl_event_id=hitl_event_id,
@@ -548,7 +604,11 @@ def _handle_escalation(
         context={
             "post_handoff_url": post_observation.url if post_observation else None,
             "post_handoff_fingerprint": post_observation.fingerprint if post_observation else None,
-            "state_changed_during_handoff": state_changed,
+            # Section 3.6's "record what the human did" - a real, before/
+            # after account of what changed on the page during the handoff
+            # window (see perception.diff_observations' docstring for why
+            # this is a state diff, not an action log).
+            "handoff_diff": diff_observations(pre_observation, post_observation),
         },
     )
 

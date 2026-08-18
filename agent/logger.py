@@ -173,6 +173,24 @@ class RunLogger:
             }
         )
 
+    def log_dialog_event(
+        self,
+        dialog_type: str,
+        message: str,
+        resolution: str,  # "accepted" | "dismissed"
+        matched_count: int,
+    ) -> None:
+        self._write(
+            {
+                "event": "dialog",
+                "run_id": self.run_id,
+                "dialog_type": dialog_type,
+                "message": message,
+                "resolution": resolution,
+                "matched_count": matched_count,
+            }
+        )
+
     def log_run_end(
         self,
         outcome_type: str,

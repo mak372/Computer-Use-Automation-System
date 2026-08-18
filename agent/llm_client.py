@@ -184,6 +184,14 @@ def render_observation(observation: Observation) -> str:
             line = f'[{el.index}] {el.role} "{el.name}"'
             if name_counts[(el.role, el.name)] > 1 and el.preceding_context:
                 line += f' (near: "{el.preceding_context}")'
+            # Only textbox/combobox ever carry a value (perception.py) - show
+            # it so the model can tell a field is already filled without
+            # having to reconcile that against free-text history under a
+            # page that may still be displaying a stale validation error
+            # from a prior submission (that text doesn't clear until the
+            # next submit, and can otherwise read as "still broken").
+            if el.value is not None:
+                line += f' (current: "{el.value}")'
             lines.append(line)
     else:
         lines.append("(none)")

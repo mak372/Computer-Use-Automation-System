@@ -288,3 +288,41 @@ def build_observation(page: Page) -> Observation:
 
 def capture_screenshot(page: Page) -> bytes:
     return page.screenshot()
+
+
+def diff_observations(pre: "Observation | None", post: "Observation | None") -> dict:
+    """A before/after account of what changed across a human handoff window
+    (loop_controller._handle_escalation / replay_controller._handle_
+    unrecoverable), Section 3.6's "record what the human did" - the
+    minimal-but-real version of it. Deliberately a state diff, not an
+    action log: literally recording individual clicks/keystrokes would mean
+    injecting live event listeners into the page, which is functionally the
+    same thing as the "full real-time co-browsing operator console"
+    Section 3.6 explicitly puts out of scope. This stays a single before/
+    after comparison computed at resolve time - a real, inspectable answer
+    to "what did the human do" inferred from net effect on page state, not
+    a stream of anything.
+
+    `pre`/`post` are None when perception itself failed on either side
+    (e.g. the page broke); that's reported as `comparable: False` rather
+    than guessed at, same "don't assume, report what's actually known"
+    principle as everywhere else in this system."""
+    if pre is None or post is None:
+        return {"comparable": False}
+
+    pre_text = set(pre.static_text)
+    post_text = set(post.static_text)
+    pre_elements = {(el.role, el.name) for el in pre.interactive_elements}
+    post_elements = {(el.role, el.name) for el in post.interactive_elements}
+
+    return {
+        "comparable": True,
+        "changed": pre.fingerprint != post.fingerprint,
+        "url_before": pre.url,
+        "url_after": post.url,
+        "url_changed": pre.url != post.url,
+        "text_added": sorted(post_text - pre_text),
+        "text_removed": sorted(pre_text - post_text),
+        "elements_added": sorted(f'{role} "{name}"' for role, name in (post_elements - pre_elements)),
+        "elements_removed": sorted(f'{role} "{name}"' for role, name in (pre_elements - post_elements)),
+    }
