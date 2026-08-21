@@ -19,7 +19,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from agent import config
 from agent.perception import InteractiveElement
@@ -95,8 +97,21 @@ def evaluate_action(
         return GuardrailDecision(decision="not_applicable", reason="allowed, no amount involved")
 
     # Ground truth, not the LLM's earlier `type` argument - read the live
-    # hidden field that will actually be submitted on this click.
-    amount_str = page.locator(f'input[name="{field_name}"]').input_value()
+    # hidden field that will actually be submitted on this click. Wrapped
+    # like every other live Playwright read on this system's failure paths
+    # (action_executor.execute_action, replay_controller.
+    # capture_diagnostic_snapshot) - a broken/half-loaded page (the amount-
+    # bearing route matched, but the field itself never rendered, or the
+    # app died mid-response) must fail closed here too, not crash the run
+    # with an uncaught exception and no run_end logged.
+    try:
+        amount_str = page.locator(f'input[name="{field_name}"]').input_value()
+    except (PlaywrightTimeoutError, PlaywrightError) as exc:
+        return GuardrailDecision(
+            decision="blocked",
+            reason=f"could not read live amount field (fail closed): {exc}",
+        )
+
     try:
         amount = float(amount_str)
     except (TypeError, ValueError):
@@ -122,5 +137,10 @@ def evaluate_action(
         )
 
     return GuardrailDecision(
-        decision="hitl_required", reason="amount requires human approval", amount=amount
+        decision="hitl_required",
+        reason=(
+            f"amount ${amount:,.2f} meets or exceeds the "
+            f"${config.RISK_TIER_HITL_THRESHOLD:,.2f} auto-approve threshold"
+        ),
+        amount=amount,
     )

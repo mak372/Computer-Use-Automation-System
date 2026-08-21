@@ -57,6 +57,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -144,6 +145,148 @@ def _unique_param_name(
     return candidate
 
 
+def _promote_identifier_params(
+    raw_steps: list[dict],
+    parameters: dict[str, dict],
+    known_values: dict[str, str],
+    param_sources: dict[str, tuple[str, str, int]],
+) -> dict[str, str]:
+    """Detects a click/link step whose own accessible name is itself a
+    resource identifier baked into the recorded flow (e.g. a "Recently
+    Viewed Members" link literally named "M-1007", clicked instead of
+    typing a member ID into a search field) - the normal rule below
+    ("every type/select step becomes a parameter, every click stays
+    literal") would otherwise hardcode that identifier forever, silently
+    locking the whole capability to whichever record happened to be open
+    during discovery, with no parameter a caller could even attempt to
+    override it with. Real bug, not hypothetical - see REPORT.md.
+
+    Detection is two-part, both required: the literal must be (a) some
+    step's own clicked/typed grounding.name, AND (b) recur as an identical
+    path segment across at least 2 OTHER steps' expected_target. Either
+    condition alone is too weak - (a) alone would promote ordinary fixed
+    button labels; (b) alone would promote ordinary fixed route vocabulary
+    that recurs across paths without ever being a literal click target
+    (e.g. "withdraw" recurs across a withdraw flow's paths but is never
+    any step's own clicked name). Requiring both narrows this specifically
+    to "a human/LLM clicked the literal value that also threads through
+    this resource's URLs" - a strong, if not airtight, signal of a
+    variable identifier.
+
+    This is a heuristic, not a proof: a goal with a genuinely fixed-label
+    button whose name happens to coincide with a recurring route segment
+    (e.g. a "Home" button on a path containing "/home/" more than once)
+    would false-positive under this rule. Acceptable because, like every
+    other auto-derived field here, the result lands in a "draft" artifact
+    a human must review before it can run - never shipped silently. See
+    also _check_unparameterized_wildcard_checkpoint, the build-time
+    sanity check for the opposite failure (a per-record checkpoint with
+    nothing parameterized at all).
+    """
+    path_segment_step_indices: dict[str, set[int]] = {}
+    for raw in raw_steps:
+        if raw["bare_path"] is None:
+            continue
+        for seg in raw["bare_path"].split("/"):
+            if seg:
+                path_segment_step_indices.setdefault(seg, set()).add(raw["step_index"])
+
+    identifier_values: dict[str, str] = {}
+    for raw in raw_steps:
+        value = raw["name"]
+        if not value or value in known_values.values() or value in identifier_values.values():
+            continue  # already a typed param's value, or already promoted
+        other_steps_with_segment = path_segment_step_indices.get(value, set()) - {raw["step_index"]}
+        if len(other_steps_with_segment) < 2:
+            continue
+
+        # Name the parameter from the URL segment immediately preceding
+        # this identifier's first occurrence (e.g. /member/{value} ->
+        # "member" -> member_id) - a reasonable default a human reviewer
+        # can rename; nothing here is trusted until reviewed anyway.
+        preceding = None
+        for other in raw_steps:
+            if other["bare_path"] is None:
+                continue
+            segs = other["bare_path"].split("/")
+            if value in segs:
+                idx = segs.index(value)
+                if idx > 0:
+                    preceding = segs[idx - 1]
+                break
+        base_name = f"{_label_to_param_name(preceding)}_id" if preceding else "resource_id"
+        param_name = _unique_param_name(base_name, ("identifier", value, 0), param_sources)
+
+        parameters[param_name] = {
+            "name": param_name,
+            "type": "string",
+            "description": (
+                f"Identifies which record this capability operates on "
+                f"(auto-derived from the recurring path/click value {value!r} "
+                "- verify and rename during review if this guess is wrong)."
+            ),
+        }
+        known_values[param_name] = value
+        identifier_values[param_name] = value
+
+    return identifier_values
+
+
+def _check_unparameterized_wildcard_checkpoint(checkpoint: dict, steps: list[dict]) -> list[str]:
+    """Sanity check, not a guarantee: if this goal's checkpoint implies a
+    per-record operation (its url_pattern contains a [^/]+ wildcard
+    segment - every checkpoints.py entry that varies per member does), but
+    nothing about this artifact suggests the record was actually supplied
+    by the caller, that's a strong signal the recorded flow hardcoded the
+    record it should have parameterized - exactly the failure shape
+    _promote_identifier_params exists to close, surfaced here as a
+    build-time warning in case some future goal or discovery path finds a
+    new way to reintroduce it.
+
+    Two independent signals count as "parameterized," matching this
+    codebase's two real patterns: (a) a {param} placeholder somewhere in
+    grounding.name/expected_target - a click-derived identifier promoted
+    by _promote_identifier_params (e.g. withdraw_funds/open_sub_account),
+    or (b) the artifact's very first step is a type/select action - the
+    flow starts by asking the caller who/what to operate on via a form
+    field (e.g. lookup_balance's "type Member ID"), never turning into a
+    path placeholder at all since it's submitted as a query string, not a
+    URL segment. Neither signal alone would be safe to use as the sole
+    check: (a) alone false-positives on lookup_balance's shape; (b) alone
+    would have missed the original bug (withdraw_funds's first typed field
+    was "amount," not an identifier - the identity was still hardcoded via
+    a click deeper in the flow).
+
+    A clean pass here is not proof the artifact is correctly parameterized
+    overall - only that neither of these two known failure shapes is
+    present. A flow whose first step types an unrelated field while its
+    real identifying click stays hardcoded elsewhere would still slip
+    through undetected - a residual gap of this being a cheap heuristic,
+    not exhaustive analysis."""
+    patterns = [checkpoint["success"]["url_pattern"]] + [
+        o["url_pattern"] for o in checkpoint["known_outcomes"]
+    ]
+    if not any("[^/]+" in p for p in patterns):
+        return []
+
+    has_placeholder = any(
+        (step["grounding"]["name"] or "").startswith("{")
+        or (step["grounding"]["expected_target"] and "{" in step["grounding"]["expected_target"][1])
+        for step in steps
+    )
+    starts_with_typed_input = bool(steps) and steps[0]["action"] in ("type", "select")
+    if has_placeholder or starts_with_typed_input:
+        return []
+
+    return [
+        "this goal's checkpoint implies a per-record operation (a wildcard "
+        "segment in its URL pattern), but no step in this artifact carries a "
+        "{param} placeholder anywhere, and the flow doesn't start by asking the "
+        "caller to identify the record - verify this artifact's steps actually "
+        "parameterize the record they operate on, not just its other inputs."
+    ]
+
+
 def build_artifact(
     run_id: str,
     goal_key: str,
@@ -197,7 +340,7 @@ def build_artifact(
     parameters: dict[str, dict] = {}
     param_sources: dict[str, tuple[str, str, int]] = {}
     known_values: dict[str, str] = {}
-    steps: list[dict] = []
+    raw_steps: list[dict] = []
 
     for event in events:
         if event.get("event") != "step" or event.get("execution_result") != "success":
@@ -243,11 +386,15 @@ def build_artifact(
                 known_values[param_name] = str(recorded_value)
             value_field = {"param": param_name}
 
-        expected_target = None
+        # Kept raw (untemplated) here, not turned into expected_target yet:
+        # identifier promotion below needs to see every step's full,
+        # untemplated path before it can tell whether a value recurs across
+        # the whole run - a step in the middle of the run can't know that on
+        # its own, in a single forward pass.
+        method, bare_path = None, None
         if raw_effective_target:
             method, raw_path = raw_effective_target
             bare_path = _bare_path(raw_path)
-            expected_target = [method, _template_path(bare_path, known_values)]
 
             if action_type == "click":
                 for pattern, field_name in config.AMOUNT_BEARING_ROUTES:
@@ -256,15 +403,51 @@ def build_artifact(
                             "threshold": config.RISK_TIER_HITL_THRESHOLD
                         }
 
-        steps.append(
+        raw_steps.append(
             {
-                "step_index": len(steps) + 1,
+                "step_index": len(raw_steps) + 1,
                 "action": action_type,
                 "value": value_field,
+                "role": role,
+                "name": name,
+                "nth": nth,
+                "method": method,
+                "bare_path": bare_path,
+            }
+        )
+
+    identifier_values = _promote_identifier_params(raw_steps, parameters, known_values, param_sources)
+
+    steps: list[dict] = []
+    for raw in raw_steps:
+        expected_target = None
+        if raw["bare_path"] is not None:
+            expected_target = [raw["method"], _template_path(raw["bare_path"], known_values)]
+
+        # If this step's own literal name is a promoted identifier, replace
+        # it with the same {param_name} placeholder convention used above
+        # for expected_target path segments - this is the field
+        # relocate_step_element() actually locates by
+        # (get_by_role(role, name=name)), unlike expected_target, which is
+        # drift-detection only (see GROUNDING_STRATEGY_NOTE). Scoped to
+        # identifier_values specifically, not all of known_values, so a
+        # typed parameter's value can never accidentally re-template an
+        # unrelated click step's name.
+        step_name = raw["name"]
+        for param_name, value in identifier_values.items():
+            if step_name == value:
+                step_name = f"{{{param_name}}}"
+                break
+
+        steps.append(
+            {
+                "step_index": raw["step_index"],
+                "action": raw["action"],
+                "value": raw["value"],
                 "grounding": {
-                    "role": role,
-                    "name": name,
-                    "nth": nth,
+                    "role": raw["role"],
+                    "name": step_name,
+                    "nth": raw["nth"],
                     "expected_target": expected_target,
                 },
             }
@@ -318,7 +501,19 @@ def build_artifact(
         "outputs": outputs,
         "checkpoint": checkpoint,
         "steps": steps,
+        # Build-time sanity checks (currently just the unparameterized-
+        # wildcard-checkpoint check) - non-empty means "look closer before
+        # trusting this draft," not "this artifact is broken." Always
+        # present (possibly []) so a human reviewer doesn't have to
+        # distinguish "checked, found nothing" from "never checked."
+        "build_warnings": _check_unparameterized_wildcard_checkpoint(checkpoint, steps),
     }
+
+
+class ArtifactSaveRefused(Exception):
+    """Raised when save_artifact() refuses a force=True rebuild that would
+    overwrite a reviewed artifact without changing capability_version - see
+    save_artifact()'s docstring."""
 
 
 def save_artifact(
@@ -339,19 +534,48 @@ def save_artifact(
     the deliberate human action the guard exists to require; only main.py's
     automatic post-success call uses the default (force=False), since that's
     the call site with no human in the loop to have decided anything.
-    Returns (path, written) - written is False when the skip fired."""
+
+    When force=True targets an artifact that is currently "reviewed", the
+    new artifact's capability_version must differ from the existing file's -
+    refuses with ArtifactSaveRefused otherwise. Reviewed status represents a
+    materially different recorded flow (new steps/grounding from a fresh
+    discovery run) getting a human's trust transferred onto it; leaving the
+    version number unchanged would silently break the one thing
+    main_replay.py's --expected-capability-version pinning exists for - a
+    caller who pinned to "version 1" to be protected from exactly this kind
+    of unreviewed drift would keep matching "version 1" with no way to
+    detect the flow underneath had changed. Scoped to the reviewed case only
+    - repeatedly force-rebuilding a still-draft artifact while iterating on
+    it has nothing to protect yet, so that stays unrestricted.
+
+    Returns (path, written) - written is False when the (force=False) skip
+    fired."""
     repo_root = repo_root or Path.cwd()
     out_dir = repo_root / config.ARTIFACTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{goal_key}.json"
 
-    if out_path.exists() and not force:
+    existing = None
+    if out_path.exists():
         try:
             existing = json.loads(out_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = {}
-        if existing.get("status") == "reviewed":
-            return out_path, False
+
+    was_reviewed = bool(existing) and existing.get("status") == "reviewed"
+
+    if was_reviewed and not force:
+        return out_path, False
+
+    if was_reviewed and force and existing.get("capability_version") == artifact.get("capability_version"):
+        raise ArtifactSaveRefused(
+            f"{out_path} is status='reviewed' at "
+            f"capability_version={existing.get('capability_version')!r}; the rebuilt "
+            "artifact has the same capability_version. Pass a different "
+            "--capability-version - overwriting a reviewed artifact's recorded flow "
+            "without bumping its version would silently defeat main_replay.py's "
+            "--expected-capability-version pinning for every caller relying on it."
+        )
 
     out_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
     return out_path, True
@@ -365,7 +589,15 @@ def main() -> None:
     parser.add_argument(
         "--goal-key", required=True, help="checkpoints.REGISTRIES key for this run's goal"
     )
-    parser.add_argument("--capability-version", type=int, default=1)
+    parser.add_argument(
+        "--capability-version",
+        type=int,
+        default=1,
+        help=(
+            "Must differ from the existing artifact's capability_version when "
+            "rebuilding one that is currently status='reviewed'."
+        ),
+    )
     args = parser.parse_args()
 
     artifact = build_artifact(
@@ -373,8 +605,14 @@ def main() -> None:
     )
     # force=True: running this CLI with an explicit run_id/goal_key already
     # is the deliberate rebuild - see save_artifact()'s docstring.
-    out_path, _ = save_artifact(artifact, args.goal_key, force=True)
+    try:
+        out_path, _ = save_artifact(artifact, args.goal_key, force=True)
+    except ArtifactSaveRefused as exc:
+        print(f"Rebuild refused: {exc}", file=sys.stderr)
+        raise SystemExit(1)
     print(f"wrote {out_path} (built_from_degraded_log={artifact['built_from_degraded_log']})")
+    for warning in artifact["build_warnings"]:
+        print(f"[artifact_builder] WARNING: {warning}", file=sys.stderr)
 
 
 if __name__ == "__main__":

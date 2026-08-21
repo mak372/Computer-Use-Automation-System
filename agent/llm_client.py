@@ -22,6 +22,7 @@ from google import genai
 from google.genai import types
 
 from agent import config
+from agent.checkpoints import REGISTRIES
 from agent.perception import Observation
 
 
@@ -140,6 +141,52 @@ _TOOLS = [
     )
 ]
 
+# A separate, one-shot tool call made before the observe/decide loop starts
+# (see loop_controller.run_discovery) - the model picks which
+# checkpoints.REGISTRIES entry this goal maps to, from a fixed enum, instead
+# of a human supplying --goal-key on the CLI. Kept as its own tool/call
+# rather than folded into the 5 step-loop actions above: capability
+# selection is a one-time decision made from the goal text alone, before any
+# page has even been observed, not a per-step browser action.
+# "unsupported" is a deliberate escape hatch, not a real capability - it lets
+# the model say "none of these fit" instead of being forced to guess the
+# closest-sounding real key (e.g. mapping "calculate EMI" onto
+# lookup_balance because both mention a member). Since "unsupported" is
+# never a key in checkpoints.REGISTRIES, loop_controller.run_discovery's
+# existing goal_key-not-in-REGISTRIES check already treats it as a
+# classification failure and routes it into the same human backup used for
+# an unreachable LLM or a malformed response - no separate handling needed.
+# Public (no leading underscore) since loop_controller imports it directly
+# rather than hardcoding the sentinel string on its own side.
+UNSUPPORTED_GOAL_KEY = "unsupported"
+
+_SELECT_CAPABILITY_SCHEMA = {
+    "name": "select_capability",
+    "description": (
+        "Choose which capability this goal is asking for. Call this exactly once, "
+        "before any browser action is considered. If the goal does not match any "
+        "of the available capabilities, use 'unsupported' rather than guessing "
+        "the closest one."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "goal_key": {
+                "type": "string",
+                "enum": sorted(REGISTRIES.keys()) + [UNSUPPORTED_GOAL_KEY],
+                "description": (
+                    "The capability this goal maps to, or 'unsupported' if none of "
+                    "the available capabilities can accomplish this goal."
+                ),
+            },
+            "reasoning": {"type": "string", "description": "Brief justification for this choice."},
+        },
+        "required": ["goal_key", "reasoning"],
+    },
+}
+
+_CAPABILITY_TOOLS = [types.Tool(function_declarations=[_SELECT_CAPABILITY_SCHEMA])]
+
 
 def build_system_instruction(goal: str) -> str:
     return (
@@ -157,8 +204,9 @@ def build_system_instruction(goal: str) -> str:
         "intended action rather than escalating on ambiguity you can resolve.\n"
         "- Call finish once the application has produced a definitive result - this "
         "includes real success AND legitimate business outcomes you observe (member "
-        "not found, restricted, limit reached, insufficient funds, etc.). For a "
-        "success outcome, "
+        "not found, restricted, session expired, limit reached, insufficient funds, "
+        "etc.) - these are answers the caller needs, not failures, even if the page "
+        "itself describes them as an error. For a success outcome, "
         "reference the [S#] entries containing the output values via output_refs - "
         "never retype a value from memory.\n"
         "- Call escalate only if you cannot safely or confidently continue - this "
@@ -240,6 +288,37 @@ class LLMClient:
         observation_text: str,
         screenshot: bytes | None,
     ) -> LLMDecision:
+        user_text = f"History so far:\n{history_text}\n\nCurrent step:\n{observation_text}"
+        return self._run_tool_call(
+            system_instruction,
+            user_text,
+            _TOOLS,
+            "one tool (click, type, select, finish, or escalate)",
+            screenshot,
+        )
+
+    def classify_goal_key(self, goal: str) -> LLMDecision:
+        """The one-shot capability-selection call (see _SELECT_CAPABILITY_SCHEMA's
+        docstring above) - made once, before run_discovery's observe/decide loop
+        starts and before any page has been observed."""
+        system_instruction = (
+            "You choose which capability a natural-language goal maps to, before "
+            "any browser action is taken. Call select_capability exactly once with "
+            "the goal_key that best matches the goal."
+        )
+        user_text = f"Goal: {goal}"
+        return self._run_tool_call(
+            system_instruction, user_text, _CAPABILITY_TOOLS, "select_capability", None
+        )
+
+    def _run_tool_call(
+        self,
+        system_instruction: str,
+        user_text: str,
+        tools: list,
+        expected_tools_description: str,
+        screenshot: bytes | None,
+    ) -> LLMDecision:
         failed_attempts: list[dict] = []
         last_failure_type: str | None = None
 
@@ -248,10 +327,11 @@ class LLMClient:
             try:
                 response = self._call_gemini(
                     system_instruction,
-                    history_text,
-                    observation_text,
+                    user_text,
+                    tools,
                     screenshot,
                     corrective_nudge=(last_failure_type == "no_tool_call"),
+                    expected_tools_description=expected_tools_description,
                 )
                 action, args, model_version = _parse_tool_call(response)
                 return LLMDecision(
@@ -283,17 +363,17 @@ class LLMClient:
     def _call_gemini(
         self,
         system_instruction: str,
-        history_text: str,
-        observation_text: str,
+        user_text: str,
+        tools: list,
         screenshot: bytes | None,
-        corrective_nudge: bool = False,
+        corrective_nudge: bool,
+        expected_tools_description: str,
     ):
-        user_text = f"History so far:\n{history_text}\n\nCurrent step:\n{observation_text}"
         if corrective_nudge:
             user_text += (
-                "\n\nYour previous response did not call one of the provided tools. "
-                "You must respond by calling exactly one tool (click, type, select, "
-                "finish, or escalate) - do not respond with plain text."
+                f"\n\nYour previous response did not call one of the provided tools. "
+                f"You must respond by calling exactly {expected_tools_description} - "
+                "do not respond with plain text."
             )
 
         parts = [types.Part.from_text(text=user_text)]
@@ -306,7 +386,7 @@ class LLMClient:
             contents=[types.Content(role="user", parts=parts)],
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=_TOOLS,
+                tools=tools,
                 http_options=types.HttpOptions(timeout=config.LLM_CALL_TIMEOUT_SECONDS * 1000),
             ),
         )

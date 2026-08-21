@@ -86,6 +86,51 @@ def request_approval(
     return response.strip().lower() in ("y", "approve")
 
 
+def request_capability_selection(
+    goal: str,
+    valid_goal_keys: list[str],
+    reason: str | None = None,
+    screenshot_path: str | None = None,
+) -> str | None:
+    """Backup path for loop_controller.run_discovery's opening
+    classify_goal_key call: if the LLM couldn't produce a trustworthy
+    goal_key (call failed after retries, or it returned something outside
+    checkpoints.REGISTRIES), ask a human to pick the capability directly
+    rather than dead-ending the whole run. Returns the chosen goal_key, or
+    None if the human aborts. Re-prompts (re-races) on anything that isn't
+    exactly one of valid_goal_keys or 'abort' - a typo at the terminal
+    should never silently fail this the way it would a one-shot prompt."""
+    print("\n=== CAPABILITY SELECTION FAILED - HUMAN INPUT REQUIRED ===")
+    print(f"Goal: {goal}")
+    if reason:
+        print(f"Reason: {reason}")
+    if screenshot_path is not None:
+        print(f"Screenshot: {screenshot_path}")
+    print(f"Valid capabilities: {', '.join(valid_goal_keys)}")
+    print("The live browser session is open for inspection.")
+    print(f"Also open: http://127.0.0.1:{config.OPERATOR_UI_PORT} for the web console")
+
+    pending = {
+        "type": "capability_selection",
+        "goal": goal,
+        "valid_goal_keys": valid_goal_keys,
+        "reason": reason,
+        "screenshot_path": screenshot_path,
+    }
+    prompt = f"Enter one of [{', '.join(valid_goal_keys)}] or 'abort': "
+    while True:
+        _source, response = _race_terminal_and_web(prompt, pending)
+        response = response.strip()
+        if response.lower() == "abort":
+            return None
+        if response in valid_goal_keys:
+            return response
+        print(
+            f"Invalid input {response!r} - must be exactly one of {valid_goal_keys} "
+            "or 'abort'. Try again."
+        )
+
+
 def request_manual_handoff(
     trigger: str,
     context: dict,

@@ -286,7 +286,72 @@ def build_observation(page: Page) -> Observation:
     )
 
 
+# Label text (as rendered in target_app's own td.lbl2/td.lbl3 cells) that
+# marks the adjacent value cell as regulated financial data / PII. Matched
+# case-insensitively against the label's own text, not the value - target_app
+# is a deliberately legacy/non-semantic surface (Section 1: "no test IDs"),
+# so there's no data-sensitive attribute to select on directly. This mirrors
+# how a human reviewer would find these fields: by reading the label next to
+# them, not by a selector a real legacy vendor app would never provide.
+_SENSITIVE_LABELS = {
+    "name", "member", "member id", "balance", "available balance",
+    "amount", "initial deposit", "email", "phone",
+}
+
+# Mirrors logger._REDACT_PATTERNS's phone-/email-shaped regexes. Needed as a
+# second, independent signal because not every sensitive value sits in a
+# label/value row at all - withdraw_confirm.html has a hardcoded
+# "Phone on file: 555-0142" string under a "Contact Verification" section
+# header, with no "Phone" label anywhere near it for signal 1 to catch.
+_SENSITIVE_CONTENT_PATTERNS = [
+    re.compile(r"\b\d{3}[-.\s]?\d{4}\b"),  # phone-shaped
+    re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),  # email-shaped
+]
+
+
+def _sensitive_mask_locators(page: Page) -> list[Locator]:
+    """Locators for every on-screen region that should be blacked out before
+    a screenshot is saved. Three independent signals:
+
+    1. A td.lbl2/td.lbl3 label whose text is in _SENSITIVE_LABELS -> mask its
+       sibling td.val2/td.val3 value cell (member detail, withdraw/sub-account
+       forms and confirmation screens all use this label/value row shape).
+    2. Any td.msg1 success banner - these interpolate a dollar figure directly
+       into a sentence ("Withdrawal of $X completed... Remaining balance: $Y"),
+       so the sensitive figure can't be isolated from the surrounding text
+       without a template change; the whole banner is masked instead.
+    3. Any td.val2/td.val3 cell whose own text is phone-/email-shaped,
+       regardless of what label (if any) precedes it - catches values with
+       no meaningful adjacent label, which signal 1 can't see by construction.
+
+    Returns only locators that actually resolved to >=1 element on the
+    current page, since Page.screenshot(mask=...) errors on a locator with
+    zero matches.
+    """
+    masks: list[Locator] = []
+    labels = page.locator("td.lbl2, td.lbl3")
+    for i in range(labels.count()):
+        cell = labels.nth(i)
+        if cell.inner_text().strip().lower() in _SENSITIVE_LABELS:
+            sibling = cell.locator("xpath=following-sibling::td[1]")
+            if sibling.count() > 0:
+                masks.append(sibling)
+    banner = page.locator("td.msg1")
+    if banner.count() > 0:
+        masks.append(banner)
+    values = page.locator("td.val2, td.val3")
+    for i in range(values.count()):
+        cell = values.nth(i)
+        text = cell.inner_text()
+        if any(pattern.search(text) for pattern in _SENSITIVE_CONTENT_PATTERNS):
+            masks.append(cell)
+    return masks
+
+
 def capture_screenshot(page: Page) -> bytes:
+    masks = _sensitive_mask_locators(page)
+    if masks:
+        return page.screenshot(mask=masks, mask_color="#000000")
     return page.screenshot()
 
 

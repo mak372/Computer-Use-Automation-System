@@ -66,13 +66,17 @@ ALLOWED_ROUTES = [
 # risk-tier evaluation before executing (the final "Confirm" actions only -
 # the earlier form POSTs are non-committal, just "continue to confirmation").
 # Maps (regex pattern, hidden field name holding the ground-truth amount).
+# Sub-account opening is deliberately excluded: unlike withdraw_funds, it
+# never deducts from member.balance (target_app/app.py's sub_account_confirm
+# only appends a new SubAccount record) - no funds leave the member's
+# relationship with the institution, so amount-based risk tiering doesn't
+# apply the way it does to a real withdrawal outflow.
 AMOUNT_BEARING_ROUTES = [
     (r"^/member/[^/]+/withdraw/confirm$", "amount"),
-    (r"^/member/[^/]+/sub-account/confirm$", "deposit_amount"),
 ]
 
 # --- Guardrails: risk tiering---
-# Applied uniformly to withdrawal amount and sub-account initial deposit.
+# Applies to withdrawal amount only - see AMOUNT_BEARING_ROUTES above.
 # amount < RISK_TIER_HITL_THRESHOLD -> auto-approved
 # amount >= RISK_TIER_HITL_THRESHOLD -> requires HITL approval, no ceiling
 RISK_TIER_HITL_THRESHOLD = 10000

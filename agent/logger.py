@@ -36,6 +36,33 @@ def redact(text: str) -> str:
     return text
 
 
+def _redact_value(value):
+    """Recursively applies redact() to every string anywhere inside value -
+    the actual enforcement point for RunLogger._write() below. Centralizing
+    it here, applied once to every event right before it's written, is
+    deliberate: redact() used to be called ad hoc at individual call sites
+    in loop_controller.py, which meant every NEW logging call site had to
+    remember to redact its own strings - replay_controller.py's step
+    logging and perception.diff_observations()'s handoff-diff text both
+    didn't, and shipped real unredacted-PII-shaped gaps as a result (see
+    REPORT.md). A single choke point every event already passes through
+    can't be silently skipped like that again.
+
+    Safe to apply broadly: redact()'s patterns only match strings that
+    actually look like a phone number or an email - an unrelated string
+    (a URL, a state fingerprint hash, a fixed vocabulary label like
+    "success") passes through completely unchanged. Tuples are redacted
+    like lists and returned as lists, matching what json.dumps would have
+    produced for them anyway (JSON has no tuple type)."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {key: _redact_value(v) for key, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v) for v in value]
+    return value
+
+
 def _new_run_id(run_type: str) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
@@ -59,6 +86,7 @@ class RunLogger:
 
     def _write(self, event: dict) -> None:
         event["logged_at"] = datetime.now(timezone.utc).isoformat()
+        event = _redact_value(event)
         try:
             line = json.dumps(event)
         except TypeError as exc:
@@ -80,6 +108,31 @@ class RunLogger:
 
     def screenshot_path(self, step_number: int) -> Path:
         return self.dir / f"step_{step_number}.png"
+
+    def log_capability_selection(
+        self,
+        goal: str,
+        goal_key: str,
+        reasoning: str,
+        model_version: str | None,
+    ) -> None:
+        """Logged once, before run_start - the LLM's own one-shot choice of
+        which checkpoints.REGISTRIES entry this goal maps to (see
+        llm_client.LLMClient.classify_goal_key), replacing a human-supplied
+        --goal-key CLI argument. A distinct event type, not a "step" event,
+        specifically so artifact_builder.py's step-extraction loop (which
+        only ever looks at event == "step") never has to know this event
+        exists at all."""
+        self._write(
+            {
+                "event": "capability_selection",
+                "run_id": self.run_id,
+                "goal": goal,
+                "goal_key": goal_key,
+                "reasoning": reasoning,
+                "model_version": model_version,
+            }
+        )
 
     def log_run_start(
         self,

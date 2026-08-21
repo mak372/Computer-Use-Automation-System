@@ -2,11 +2,13 @@
 
 Usage:
     python -m agent.main_replay --goal-key withdraw_funds --param member_id=M-1007 --param amount=150
+    python -m agent.main_replay --goal-key withdraw_funds --param amount=150 --target http://127.0.0.1:5001
 
 Runs one deterministic replay of a previously-built, human-reviewed
 artifact (agent/artifact_builder.py output, artifacts/{goal_key}.json)
-against the live target_app - no LLM call anywhere in this path, unlike
-python -m agent.main. Requires target_app running separately
+against a live target application (default: config.TARGET_BASE_URL,
+overridable with --target) - no LLM call anywhere in this path, unlike
+python -m agent.main. Requires that target running separately
 (python target_app/app.py). No GEMINI_API_KEY needed.
 """
 
@@ -60,6 +62,11 @@ def main() -> int:
         default=None,
         help="Refuse to run if the artifact's capability_version doesn't match this.",
     )
+    parser.add_argument(
+        "--target",
+        default=config.TARGET_BASE_URL,
+        help=f"Base URL of the target application (default: {config.TARGET_BASE_URL}).",
+    )
     args = parser.parse_args()
 
     parameters = dict(args.param)
@@ -88,10 +95,10 @@ def main() -> int:
         try:
             page = browser.new_page()
             try:
-                page.goto(config.TARGET_BASE_URL)
+                page.goto(args.target)
             except Exception as exc:
                 print(
-                    f"Could not reach target_app at {config.TARGET_BASE_URL} - "
+                    f"Could not reach target_app at {args.target} - "
                     f"is it running? ({exc})",
                     file=sys.stderr,
                 )

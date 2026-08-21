@@ -152,12 +152,24 @@ def bind_parameters(artifact: dict, parameters: dict[str, Any]) -> dict[str, str
     fill()/select_option() always take strings regardless of the declared
     contract type (see action_executor.py) - the declared type is a
     calling-agent-facing contract concern, checked here once, never
-    branched on again during execution."""
-    declared = {p["name"]: p["type"] for p in artifact.get("parameters", [])}
+    branched on again during execution.
+
+    A declared parameter marked "hitl_if_missing": true (a reviewer-
+    authored field) may be omitted by the caller - it is simply absent
+    from the returned dict, not silently defaulted to anything. If the run
+    actually reaches the step that needs it, the step-execution loop
+    (_execute_one_step / _request_missing_parameter_value) asks a human to
+    set it directly in the live browser, the same Section 3.6 handoff
+    mechanism used for every other "automation can't safely proceed on its
+    own" condition in this system - never a guessed or silently-applied
+    default. Every other declared parameter remains required here, fail
+    fast before the browser is ever touched."""
+    declared = {p["name"]: p for p in artifact.get("parameters", [])}
 
     missing = declared.keys() - parameters.keys()
-    if missing:
-        raise ReplayValidationError(f"missing required parameter(s): {sorted(missing)}")
+    required_missing = {name for name in missing if not declared[name].get("hitl_if_missing")}
+    if required_missing:
+        raise ReplayValidationError(f"missing required parameter(s): {sorted(required_missing)}")
 
     unknown = parameters.keys() - declared.keys()
     if unknown:
@@ -166,7 +178,7 @@ def bind_parameters(artifact: dict, parameters: dict[str, Any]) -> dict[str, str
         )
 
     for name, value in parameters.items():
-        _validate_param_shape(name, declared[name], value)
+        _validate_param_shape(name, declared[name]["type"], value)
 
     return {name: str(value) for name, value in parameters.items()}
 
@@ -216,6 +228,21 @@ def relocate_step_element(
     """
     grounding = step["grounding"]
     role, name, nth = grounding["role"], grounding["name"], grounding["nth"]
+
+    # A click/link step whose own recorded name IS a variable identifier
+    # (artifact_builder._promote_identifier_params - e.g. a "Recently
+    # Viewed Members" link literally named "M-1007") is stored as the
+    # placeholder "{param_name}", the same {param} convention
+    # _rehydrate_path already uses for path segments. Substitute this
+    # run's actual bound value before ever calling get_by_role - this is
+    # the field that actually locates the live element (expected_target,
+    # below, is drift-detection only), so leaving it un-substituted would
+    # make replay search for a literal element named "{member_id}" that
+    # can never exist.
+    if isinstance(name, str) and name.startswith("{") and name.endswith("}"):
+        param_name = name[1:-1]
+        if param_name in bound_params:
+            name = bound_params[param_name]
 
     count = page.get_by_role(role, name=name, exact=True).count()
     if count <= nth:
@@ -476,6 +503,7 @@ def _guardrail_gate(
     element: InteractiveElement,
     page: Page,
     logger: RunLogger,
+    goal_key: str,
     step: dict,
     step_index: int,
     skip_hitl_prompt: bool,
@@ -526,7 +554,31 @@ def _guardrail_gate(
             trigger="guardrail_threshold",
             context={"action": step["action"], "element": element.name, "amount": guardrail.amount},
         )
-        approved = operator.request_approval(f'{step["action"]} "{element.name}"', guardrail.amount)
+
+        # Guaranteed here, not incidental - discovery's equivalent capture
+        # is opportunistic (reuses whatever screenshot an unrelated
+        # condition happened to already trigger this step); replay has no
+        # such per-step screenshot cadence to piggyback on at all, so this
+        # is the only chance to carry "the current state" into the
+        # approval prompt per Section 3.6. Best-effort, same as every
+        # other screenshot capture in this file - never let a diagnostic
+        # failure block the actual approval flow.
+        screenshot_path = None
+        try:
+            path = logger.screenshot_path(step_index)
+            path.write_bytes(capture_screenshot(page))
+            screenshot_path = str(path)
+        except Exception:
+            screenshot_path = None
+
+        approved = operator.request_approval(
+            f'{step["action"]} "{element.name}"',
+            guardrail.amount,
+            guardrail.reason,
+            goal_key=goal_key,
+            step_number=step_index,
+            screenshot_path=screenshot_path,
+        )
         logger.log_hitl_event(
             hitl_event_id=hitl_event_id,
             phase="resolved",
@@ -827,6 +879,94 @@ def _locate_or_terminal(
     )
 
 
+def _request_missing_parameter_value(
+    page: Page,
+    logger: RunLogger,
+    goal_key: str,
+    element: InteractiveElement,
+    step_index: int,
+    param_name: str,
+) -> Optional["ReplayResult"]:
+    """Section 3.6 handoff for a declared "hitl_if_missing" parameter the
+    caller omitted, triggered only once the run has actually reached the
+    step that needs it (bind_parameters() lets the run start without it).
+    Mirrors real operational practice: if a caller omits a withdrawal
+    method, a real bank clerk doesn't guess or silently apply a default -
+    they ask, or set it themselves at the counter. The human is asked to
+    make that live selection directly in the open browser, not via a text
+    prompt - the field's actual valid choices already exist there, so
+    re-deriving or hardcoding them separately would risk drifting from
+    what the live page actually offers.
+
+    Returns a terminal ReplayResult if the human aborts. Returns None if
+    they resumed, having set the value themselves - the caller is
+    responsible for reading the live element's now-current value and
+    treating this step as already executed, never re-submitting it through
+    execute_action (the human's own live interaction already produced the
+    equivalent DOM state)."""
+    hitl_event_id = secrets.token_hex(4)
+
+    screenshot_path = logger.screenshot_path(step_index)
+    try:
+        screenshot_path.write_bytes(capture_screenshot(page))
+    except Exception:
+        screenshot_path = None
+
+    context = {
+        "missing_parameter": param_name,
+        "instruction": (
+            f"Set the '{element.name}' field directly in the live browser to "
+            "the value this run needs, then resume."
+        ),
+    }
+    logger.log_hitl_event(
+        hitl_event_id=hitl_event_id, phase="raised",
+        trigger="missing_parameter_value", context=context,
+    )
+
+    resumed = operator.request_manual_handoff(
+        "missing_parameter_value", context, goal_key=goal_key,
+        step_number=step_index, screenshot_path=str(screenshot_path) if screenshot_path else None,
+    )
+
+    logger.log_hitl_event(
+        hitl_event_id=hitl_event_id, phase="resolved",
+        decision="resolved_manually" if resumed else "aborted",
+        operator_id="local-operator",
+    )
+
+    if not resumed:
+        return ReplayResult(
+            outcome_type="escalated",
+            outcome_label="hitl_denied_missing_parameter",
+            outputs=None,
+            total_steps=step_index,
+            run_id=logger.run_id,
+            failed_at_step=step_index,
+            expected=f"a human-supplied value for {param_name!r}",
+            observed="human aborted the handoff instead of supplying one",
+        )
+    return None
+
+
+def _invalid_select_value(element: InteractiveElement, value: Optional[str]) -> Optional[list[str]]:
+    """Best-effort check run only after a select step's execution has
+    already failed: reads the live <select>'s actual <option value=...>
+    values directly off the DOM and returns them if `value` isn't among them
+    - the caller then treats this as a definitive parameter error rather
+    than an ambiguous execution failure. Returns None (fails safe into the
+    existing generic checkpoint-override/retry path) if the options
+    themselves can't be read, or if `value` actually is valid and the
+    failure must have some other cause."""
+    try:
+        options = element.locator.locator("option").evaluate_all("opts => opts.map(o => o.value)")
+    except Exception:
+        return None
+    if value not in options:
+        return options
+    return None
+
+
 def _execute_one_step(
     page: Page,
     logger: RunLogger,
@@ -843,7 +983,7 @@ def _execute_one_step(
         return terminal
 
     guardrail, refusal, just_approved = _guardrail_gate(
-        element, page, logger, step, step_index, skip_hitl_prompt=False
+        element, page, logger, goal_key, step, step_index, skip_hitl_prompt=False
     )
     if refusal is not None:
         return refusal
@@ -852,11 +992,53 @@ def _execute_one_step(
     # is the exact-scoped equivalent of tracking approved_step_indices.
     step_hitl_approved = just_approved
 
+    if step["value"] is not None and step["value"]["param"] not in bound_params:
+        param_name = step["value"]["param"]
+        handoff_result = _request_missing_parameter_value(
+            page, logger, goal_key, element, step_index, param_name
+        )
+        if handoff_result is not None:
+            return handoff_result
+        live_value = element.locator.input_value()
+        _log_replay_step(
+            logger, step_index, step, live_value, "success_via_hitl_value",
+            retried=False, guardrail=guardrail,
+        )
+        return None
+
     value = bound_params[step["value"]["param"]] if step["value"] is not None else None
     exec_result = execute_action(element, step["action"], value)
     if exec_result.success:
         _log_replay_step(logger, step_index, step, value, "success", retried=False, guardrail=guardrail)
         return None
+
+    if step["action"] == "select":
+        valid_options = _invalid_select_value(element, value)
+        if valid_options is not None:
+            # A caller-supplied value the live <select> has no matching
+            # <option> for is a parameter error, not "automation got stuck" -
+            # no retry (the identical bad value would just fail identically
+            # again) and no checkpoint-override/human handoff (there's
+            # nothing for a human to fix on the live page; only a fresh run
+            # with a valid value corrects this). Same category
+            # bind_parameters' preflight checks already cover for
+            # missing/unknown/wrong-type params, just one that can only be
+            # detected once this step's live <select> is actually reached -
+            # its option set isn't known any earlier than that.
+            _log_replay_step(
+                logger, step_index, step, value, "invalid_parameter_value",
+                retried=False, guardrail=guardrail,
+            )
+            return ReplayResult(
+                outcome_type="failed",
+                outcome_label="invalid_parameter_value",
+                outputs=None,
+                total_steps=step_index,
+                run_id=logger.run_id,
+                failed_at_step=step_index,
+                expected=f"one of {valid_options}",
+                observed=value,
+            )
 
     override = _try_checkpoint_override(page, logger, artifact, goal_key, element, step_index)
     if override is not None:
@@ -873,7 +1055,7 @@ def _execute_one_step(
         return terminal
 
     guardrail, refusal, just_approved = _guardrail_gate(
-        element, page, logger, step, step_index, skip_hitl_prompt=step_hitl_approved
+        element, page, logger, goal_key, step, step_index, skip_hitl_prompt=step_hitl_approved
     )
     if refusal is not None:
         return refusal
@@ -945,7 +1127,55 @@ def run_replay(
             return result
 
     total_steps = len(artifact["steps"])
-    final_observation = build_observation(page)
+    try:
+        final_observation = build_observation(page)
+    except Exception as exc:
+        # Every recorded step already executed successfully - this is only
+        # the post-run "does the final page match the checkpoint" read.
+        # Unlike every other build_observation() call in this file, this
+        # one wasn't guarded (the gap Section 3.5's audit found): an
+        # exception here used to propagate straight out of run_replay()
+        # uncaught, crashing the whole process instead of ending with the
+        # same structured, evidence-backed ReplayResult every other failure
+        # path in this module produces. Best-effort screenshot: page.
+        # screenshot() doesn't depend on the accessibility-tree read that
+        # just failed, so it can very plausibly still succeed here.
+        screenshot_reason = None
+        try:
+            logger.screenshot_path(total_steps).write_bytes(capture_screenshot(page))
+            screenshot_reason = "final_observation_failed"
+        except Exception:
+            screenshot_reason = None
+
+        logger.log_step(
+            step_number=total_steps,
+            observation_summary={
+                "screenshot_path": (f"step_{total_steps}.png" if screenshot_reason else None),
+                "screenshot_reason": screenshot_reason,
+            },
+            action={"diagnostic": "final_observation_failed"},
+            guardrail_result={"decision": "not_applicable"},
+            execution_result="perception_failed",
+            state_fingerprint="",
+        )
+        result = ReplayResult(
+            outcome_type="failed",
+            outcome_label="final_observation_failed",
+            outputs=None,
+            total_steps=total_steps,
+            run_id=logger.run_id,
+            failed_at_step=total_steps,
+            expected="a readable final page after all steps completed",
+            observed=f"perception failed: {exc}",
+        )
+        logger.log_run_end(
+            outcome_type=result.outcome_type,
+            outputs=result.outputs,
+            checkpoint_verification={"matched": False},
+            total_steps=total_steps,
+        )
+        return result
+
     match = resolve_checkpoint(artifact, goal_key, final_observation)
 
     if match.outcome_type is None:

@@ -45,6 +45,8 @@ htmlcov/
 Assignment A — Computer-Use Automation System.pdf
 things to check before report.md
 PROGRESS.md
+REPORT.md
+report2.md
 .coverage.*
 .cache
 nosetests.xml

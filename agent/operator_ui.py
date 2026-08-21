@@ -143,6 +143,7 @@ _PAGE_HTML = """<!doctype html>
   .row { display: flex; padding: 0.35rem 0; border-bottom: 1px solid #eee; }
   .row .label { width: 160px; color: #666; flex-shrink: 0; }
   .shot { max-width: 100%; margin-top: 1rem; border: 1px solid #ddd; border-radius: 4px; }
+  .hint { background: #fff8e1; color: #6b4e00; border: 1px solid #ffe082; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; font-size: 0.95rem; }
   .actions { margin-top: 1.2rem; }
   .btn { padding: 0.6rem 1.4rem; margin-right: 0.6rem; border: none; border-radius: 5px; font-size: 1rem; cursor: pointer; }
   .btn.approve { background: #1a7a3c; color: #fff; }
@@ -181,21 +182,38 @@ function render(data) {
     return;
   }
 
-  let fields = ''
-    + '<div class="row"><span class="label">Capability/Goal</span><span>' + esc(data.goal_key ?? '-') + '</span></div>'
-    + '<div class="row"><span class="label">Step</span><span>' + esc(data.step_number ?? '-') + '</span></div>';
-
+  let fields = '';
   let buttons;
+
   if (data.type === 'approval') {
     fields += ''
+      + '<div class="row"><span class="label">Capability/Goal</span><span>' + esc(data.goal_key ?? '-') + '</span></div>'
+      + '<div class="row"><span class="label">Step</span><span>' + esc(data.step_number ?? '-') + '</span></div>'
       + '<div class="row"><span class="label">Action</span><span>' + esc(data.action_description ?? '-') + '</span></div>'
       + '<div class="row"><span class="label">Amount</span><span>' + (data.amount != null ? '$' + Number(data.amount).toLocaleString(undefined, {minimumFractionDigits: 2}) : '-') + '</span></div>'
       + '<div class="row"><span class="label">Reason</span><span>' + esc(data.reason ?? '-') + '</span></div>';
     buttons = ''
       + '<button class="btn approve" onclick="resolveDecision(\\'approve\\')">Approve</button>'
       + '<button class="btn deny" onclick="resolveDecision(\\'deny\\')">Deny</button>';
+  } else if (data.type === 'capability_selection') {
+    // No goal_key/step_number yet - that's exactly what this prompt is
+    // resolving - so this branch shows the raw goal text instead.
+    fields += '<div class="row"><span class="label">Goal</span><span>' + esc(data.goal ?? '-') + '</span></div>';
+    if (data.reason) {
+      fields += '<div class="row"><span class="label">Reason</span><span>' + esc(data.reason) + '</span></div>';
+    }
+    buttons = (data.valid_goal_keys || []).map(function(k) {
+      return '<button class="btn approve" onclick="resolveDecision(\\'' + k + '\\')">' + esc(k) + '</button>';
+    }).join('') + '<button class="btn deny" onclick="resolveDecision(\\'abort\\')">Abort</button>';
   } else {
-    fields += '<div class="row"><span class="label">Trigger</span><span>' + esc(data.trigger ?? '-') + '</span></div>';
+    fields += ''
+      + '<div class="hint">&#9888; This screen only shows context - it cannot take actions on the site itself. '
+      + 'Switch to the live automation browser window (the separate Chromium window this run opened, '
+      + 'usually on port 5000) and complete the needed step there by hand - see Trigger/details below for '
+      + 'what\\'s needed (e.g. filling in a Member ID or similar). Then come back to THIS page and click Resume.</div>'
+      + '<div class="row"><span class="label">Capability/Goal</span><span>' + esc(data.goal_key ?? '-') + '</span></div>'
+      + '<div class="row"><span class="label">Step</span><span>' + esc(data.step_number ?? '-') + '</span></div>'
+      + '<div class="row"><span class="label">Trigger</span><span>' + esc(data.trigger ?? '-') + '</span></div>';
     if (data.context) {
       for (const [k, v] of Object.entries(data.context)) {
         fields += '<div class="row"><span class="label">' + esc(k) + '</span><span>' + esc(v) + '</span></div>';

@@ -10,29 +10,44 @@ exact-template regexes) rather than trusted from the LLM's own transcription.
 This same signature registry is what the artifact's checkpoint (Section
 3.2/3.3) will reuse for deterministic replay verification later.
 
-Deliberately excluded from every registry: form validation errors that
-are genuine data-entry mistakes (a malformed amount, a missing nickname)
-- recoverable, since any valid input fixes them, so the agent corrects
-and retries rather than calling finish. Also excluded: the similar-account
-interstitial (recoverable, agent clicks through it - not a terminal state
-at all), and the "broken page" / system-error state (a hard failure the
-agent should escalate on, not report as a completed goal - leaving it
-unregistered means a finish() claiming it gets rejected, enforcing the
-business-outcome-vs-hard-failure distinction structurally rather than
-only via prompting).
+Still excluded from every registry: the similar-account interstitial
+(recoverable, agent clicks through it - not a terminal state at all), and
+the "broken page" / system-error state (a hard failure the agent should
+escalate on, not report as a completed goal - leaving it unregistered
+means a finish() claiming it gets rejected, enforcing the business-
+outcome-vs-hard-failure distinction structurally rather than only via
+prompting).
 
-`insufficient_funds` (withdraw_funds registry) is the one validation-
-error-shaped state that IS registered, and deliberately so: unlike a
-data-entry mistake (a malformed amount, a bad member ID format) which a
-human or an LLM could plausibly correct by retrying, insufficient funds
-is a fact about the account's real state that no retry - human or
-automated - can fix within this run. It is therefore a legitimate
-terminal business outcome for replay to report, exactly like
-member_not_found, rather than a recoverable condition. This distinction
-was sharpened after a real replay run hit exactly this state and, before
-this entry existed, misreported it as checkpoint/grounding drift - a
-misleading label implying the app had structurally changed, when it had
-behaved exactly as designed (see REPORT.md).
+Form validation errors ARE now registered, though - a real correction
+from this module's earlier position (which excluded them all as "the
+agent corrects and retries"). That reasoning only ever held for
+discovery: an LLM that sees "Amount must be a positive number." can
+retype a valid amount and carry on. Replay has no such option - its
+steps are fixed, and a bad value can only ever have come from what the
+caller supplied as a parameter (see replay_controller.bind_parameters,
+which only checks type shape, e.g. "is this a number," not business rules
+like positivity). Before these were registered, a caller-supplied
+negative amount or empty nickname would fall through to the same
+unclassified "checkpoint drift" a genuinely broken app would produce -
+technically safe (nothing wrong ever executes silently; the run still
+eventually escalates to a human via the checkpoint-drift fallback) but
+misleading and slow to diagnose, exactly the misreporting insufficient_
+funds below was already fixed for. Same fix, same reasoning, just for the
+sibling failure shape the brief explicitly names ("a validation error" -
+Section 3.3) that the first fix didn't yet cover.
+
+`insufficient_funds` (withdraw_funds registry) was the first validation-
+error-shaped state registered, and deliberately so: unlike a data-entry
+mistake (a malformed amount, a bad member ID format) which a human or an
+LLM could plausibly correct by retrying, insufficient funds is a fact
+about the account's real state that no retry - human or automated - can
+fix within this run. It is therefore a legitimate terminal business
+outcome for replay to report, exactly like member_not_found, rather than
+a recoverable condition. This distinction was sharpened after a real
+replay run hit exactly this state and, before this entry existed,
+misreported it as checkpoint/grounding drift - a misleading label
+implying the app had structurally changed, when it had behaved exactly
+as designed (see REPORT.md).
 """
 
 from __future__ import annotations
@@ -57,8 +72,17 @@ def _extract_balance(refs: list[str]) -> dict:
 def _extract_sub_account_created(refs: list[str]) -> dict:
     if not refs:
         raise ValueError("success outcome requires at least one output_ref")
+    # Greedy `.+` (not `[^"]+`) for the nickname group: a nickname containing
+    # a literal `"` (e.g. Mom's "Special" Fund) renders HTML-escaped in the
+    # template source, but Playwright's text extraction decodes it back to a
+    # literal quote before this regex ever sees it - a negated-quote class
+    # would truncate the capture there and fail the whole match on a
+    # genuinely successful creation. Backtracking from a greedy `.+` finds
+    # the correct (rightmost) boundary instead. account_type is anchored to
+    # the app's actual two <option> values (sub_account_form.html), not
+    # `[^)]+`, to remove any residual ambiguity in where that boundary is.
     match = re.search(
-        r'Sub-account "([^"]+)" \(([^)]+)\) created successfully '
+        r'Sub-account "(.+)" \((savings|checking)\) created successfully '
         r"with an initial deposit of \$([\d,]+\.\d{2})",
         refs[0],
     )
@@ -112,6 +136,7 @@ REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
         "member_not_found": OutcomeSpec(r"^/member/[^/]+$", "No member found with ID"),
         "restricted": OutcomeSpec(r"^/member/[^/]+$", "This account is restricted"),
         "session_expired": OutcomeSpec(r"^/member/[^/]+$", "Your session has expired"),
+        "missing_member_id": OutcomeSpec(r"^/lookup$", "Please enter a Member ID."),
     },
     "open_sub_account": {
         "success": OutcomeSpec(
@@ -131,6 +156,12 @@ REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
             r"^/member/[^/]+/sub-account/new$",
             "already has the maximum number of sub-accounts",
         ),
+        "invalid_deposit_amount": OutcomeSpec(
+            r"^/member/[^/]+/sub-account/new$", "Initial deposit must be a positive number."
+        ),
+        "missing_nickname": OutcomeSpec(
+            r"^/member/[^/]+/sub-account/new$", "Nickname is required."
+        ),
     },
     "withdraw_funds": {
         "success": OutcomeSpec(
@@ -144,6 +175,9 @@ REGISTRIES: dict[str, dict[str, OutcomeSpec]] = {
         "session_expired": OutcomeSpec(r"^/member/[^/]+$", "Your session has expired"),
         "insufficient_funds": OutcomeSpec(
             r"^/member/[^/]+/withdraw$", "Insufficient funds for this withdrawal"
+        ),
+        "invalid_amount": OutcomeSpec(
+            r"^/member/[^/]+/withdraw$", "Amount must be a positive number."
         ),
     },
 }
