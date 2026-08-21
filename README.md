@@ -10,7 +10,7 @@ See `REPORT.md` for the full design write-up (architecture, artifact schema, saf
 
 Creates a virtual environment (`.venv`), installs dependencies into it, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact.
 
-Needs `.env` with `GEMINI_API_KEY` set first — discovery calls the LLM (replay doesn't). Create a `.env` file in the project root:
+Needs `.env` with `GEMINI_API_KEY` set first, discovery calls the LLM (replay doesn't). Create a `.env` file in the project root:
 ```
 GEMINI_API_KEY=your-key-here
 ```
@@ -23,7 +23,7 @@ On macOS/Linux, or Windows Git Bash:
 ```
 ./demo.sh
 ```
-On Windows, don't run `demo.sh` via a bare `bash demo.sh` if you also have WSL installed — `bash` on your `PATH` may resolve to WSL's bash instead of Git Bash, which runs against a completely separate Linux Python/browser environment than the rest of this setup expects. Use `demo.ps1` instead, or launch a Git Bash terminal directly (right-click the folder → "Git Bash Here") rather than typing `bash` from PowerShell.
+On Windows, don't run `demo.sh` via a bare `bash demo.sh` if you also have WSL installed  `bash` on your `PATH` may resolve to WSL's bash instead of Git Bash, which runs against a completely separate Linux Python/browser environment than the rest of this setup expects. Use `demo.ps1` instead, or launch a Git Bash terminal directly (right-click the folder → "Git Bash Here") rather than typing `bash` from PowerShell.
 
 A real browser window opens during the discovery step; if the run needs human input it'll pause and prompt in the terminal (and at `http://127.0.0.1:5050`), same as running the commands manually.
 
@@ -31,34 +31,34 @@ A real browser window opens during the discovery step; if the run needs human in
 
 ## Manual setup (if you'd rather not run the script)
 
-1. **Create a virtual environment and install dependencies** (a venv avoids permission/lock conflicts with a global Python install, which is a common source of install failures on Windows)
+1. **Create a virtual environment and install dependencies**
    ```
    python -m venv .venv
    ```
-   Activate it — PowerShell: `.venv\Scripts\Activate.ps1`, Git Bash: `source .venv/Scripts/activate`, macOS/Linux: `source .venv/bin/activate` — then:
+   Activate it PowerShell: `.venv\Scripts\Activate.ps1`, Git Bash: `source .venv/Scripts/activate`, macOS/Linux: `source .venv/bin/activate` then:
    ```
    pip install -r requirements.txt
    playwright install chromium
    ```
 
-2. **Set your Gemini API key** (only needed for discovery, not replay — see below)
+2. **Set your Gemini API key**
 
    Create a `.env` file in the project root with content given below by putting your own gemini api key:
    ```
    GEMINI_API_KEY=your-key-here
    ```
 
-3. **Start the target application** (a local mock banking app — this always has to be running, in a separate terminal, for either mode):
+3. **Start the target application** (This always has to be running, in a separate terminal):
    ```
    python target_app/app.py
    ```
    Runs on `http://127.0.0.1:5000`.
 
-That's the only "live service" this project talks to besides the LLM — `target_app` is a local Flask app included in this repo, not a third-party service.
+That's the only "live service" this project talks to besides the LLM  `target_app` is a local Flask app made for mocking the surface UI.
 
 ## Running without the LLM
 
-**Replay never calls the LLM and never needs `GEMINI_API_KEY`.** It executes a fixed, previously human-reviewed artifact (see `artifacts/*.json`) deterministically. If you just want to see the automation actually work without setting up an API key, skip straight to the replay command in the manual demo path below — the three capability artifacts already committed in `artifacts/` are ready to replay.
+**Replay never calls the LLM and never needs `GEMINI_API_KEY`.** It executes a fixed, previously human-reviewed artifact (see `artifacts/*.json`) deterministically. If you just want to see the automation actually work without setting up an API key, skip straight to the replay command in the manual demo path below the three capability artifacts already committed in `artifacts/` are ready to replay.
 
 Discovery (`agent.main`) does require a real `GEMINI_API_KEY`, since an LLM call is what decides each action.
 
@@ -67,35 +67,33 @@ Discovery (`agent.main`) does require a real `GEMINI_API_KEY`, since an LLM call
 With `target_app` running in one terminal, in another terminal:
 
 **1. Run discovery on a natural-language goal** (requires `GEMINI_API_KEY`):
+### Command parameters
+
+**Discovery** (`python -m agent.main`):
+- `--goal` (required) - the natural-language goal you want the agent to complete, e.g. `"Look up member M-1001 and report their balance."`
 ```
 python -m agent.main --goal "Look up member M-1001 and report their balance."
 ```
-A small operator console also starts at `http://127.0.0.1:5050` — it stays idle unless the run needs human input (a risky-amount approval, or a stuck condition), in which case both that console and the terminal prompt for a decision.
+A small operator console also starts at `http://127.0.0.1:5050` it stays idle unless the run needs human input (a risky-amount approval, or a stuck condition), in which case both that console and the terminal prompt for a decision.
 
 A freshly auto-built artifact starts as `"status": "draft"` replay refuses to run a draft artifact. The three artifacts already committed in this repo have been manually reviewed and marked `"status": "reviewed"`; if you build a new one from your own discovery run, edit its `status` field to `"reviewed"` before replaying it.
 
 **2. Replay the resulting artifact** (no API key needed):
+### Command parameters
+**Replay** (`python -m agent.main_replay`):
+- `--goal-key` (required) - which artifact to replay: `lookup_balance`, `withdraw_funds`, or `open_sub_account`.
+- `--param name=value` (repeatable) - one flag per parameter the artifact declares, e.g. `--param member_id=M-1001 --param amount=150`. Which parameters are required depends on the goal you're replaying (see the examples below).
+- `--expected-capability-version` (optional) - if set, replay refuses to run unless the artifact's `capability_version` matches this exactly; use it if you want to guard against the artifact having changed underneath you since you last checked.
+- `--target` (optional, defaults to `http://127.0.0.1:5000`) - base URL of the target application.
+
+**Which `--param` flags each goal needs while replay:**
+- `lookup_balance` - `member_id` (string, e.g. `M-1001`)
+- `withdraw_funds` - `member_id`, `amount` (number), `withdrawal_method` (one of `cash`, `check`, `transfer`)
+- `open_sub_account` - `member_id`, `nickname` (string, name for the new sub-account), `initial_deposit` (number)
 ```
 python -m agent.main_replay --goal-key lookup_balance --param member_id=M-1001
 ```
-This drives the same browser flow again, but deterministically — no LLM, just the recorded steps re-executed against the live target app and verified against the artifact's recorded checkpoint.
-
-### Command parameters
-
-**Discovery** (`python -m agent.main`):
-- `--goal` (required) — the natural-language goal you want the agent to complete, e.g. `"Look up member M-1001 and report their balance."`
-- `--target` (optional, defaults to `http://127.0.0.1:5000`) — base URL of the target application; only needed if it's running somewhere other than the default.
-
-**Replay** (`python -m agent.main_replay`):
-- `--goal-key` (required) — which artifact to replay: `lookup_balance`, `withdraw_funds`, or `open_sub_account`.
-- `--param name=value` (repeatable) — one flag per parameter the artifact declares, e.g. `--param member_id=M-1001 --param amount=150`. Which parameters are required depends on the goal you're replaying (see the examples below).
-- `--expected-capability-version` (optional) — if set, replay refuses to run unless the artifact's `capability_version` matches this exactly; use it if you want to guard against the artifact having changed underneath you since you last checked.
-- `--target` (optional, defaults to `http://127.0.0.1:5000`) — base URL of the target application.
-
-**Which `--param` flags each goal needs:**
-- `lookup_balance` — `member_id` (string, e.g. `M-1001`)
-- `withdraw_funds` — `member_id`, `amount` (number), `withdrawal_method` (one of `cash`, `check`, `transfer`)
-- `open_sub_account` — `member_id`, `nickname` (string, name for the new sub-account), `initial_deposit` (number)
+This drives the same browser flow again, but deterministically no LLM, just the recorded steps re-executed against the live target app and verified against the artifact's recorded checkpoint.
 
 Other supported goals, if you want to try discovery → replay for each:
 ```
