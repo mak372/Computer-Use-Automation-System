@@ -9,6 +9,7 @@ Replay is given a goal and its parameters. It locates the artifact for that goal
 
 ## Artifact schema
 A minimal fragment of a reviewed `withdraw_funds` artifact is shown below. The other capabilities follow the same structure, with differences in their inputs, actions, and expected outcomes.
+```json
 {
       "schema_version": 1,                // Tracks changes to the artifact's format
       "capability_version": 1,            //  Tracks changes to the workflow itself
@@ -32,6 +33,7 @@ A minimal fragment of a reviewed `withdraw_funds` artifact is shown below. The o
         }]
       }
     }
+  ``` 
 A successful discovery run does not automatically become a trusted artifact. New artifacts start as `draft` because discovery may not always correctly determine which values should become reusable inputs or which page elements an action should use. A human reviews these decisions before the artifact is approved for replay. This review happens once, when the artifact is built not on every replay run.The final artifact stores the reusable workflow, not the specific values from that run. A reviewed workflow cannot be changed without giving it a new `capability_version`. If replay is given an older version, it refuses to run instead of silently using a newer workflow. This makes changes explicit and prevents unexpected behavior.
 
 ## Determinism & Error Handling
