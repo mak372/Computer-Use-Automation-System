@@ -4,6 +4,8 @@ A goal-driven browser automation agent with two modes: **discovery**, where an L
 
 See `REPORT.md` for the full design write-up (architecture, artifact schema, safety model, and known limitations).
 
+**Prerequisites:** Python 3.10+ (tested on 3.13), and `git` to clone this repo. Everything else (Flask, Playwright, Chromium, etc.) is installed by the steps below.
+
 ## Quickstart (one command)
 
 Creates a virtual environment (`.venv`), installs dependencies into it, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact.
