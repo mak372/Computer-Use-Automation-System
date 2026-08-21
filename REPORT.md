@@ -1,4 +1,4 @@
-1. Architecture
+## Architecture
 The implementation targets a web application. The system receives a natural-language goal. Before the task starts, one LLM call maps the goal to one of the three supported capabilities: looking up a member's balance, withdrawing funds, or opening a sub-account. If the call fails, returns an unsupported capability, or cannot find a match, the system does not guess; it asks a human to choose. This makes uncertain classification a human decision rather than an incorrect automated action.
 
 **Discovery**
@@ -7,7 +7,7 @@ At each step, the page is observed, the LLM decides the next action (click, type
 **Replay**
 Replay is given a goal and its parameters. It locates the artifact for that goal and follows its recorded steps in order, re-grounding each element live on the page right before acting the same role/label/position description discovery recorded. The same guardrail and verification checks from discovery still run on every step. If a step can't proceed as recorded, the element has drifted, an action gets blocked or execution fails then the system tries to resolve it automatically first and only hands off to a human if that doesn't work.
 
-2. Artifact schema
+## Artifact schema
 A minimal fragment of a reviewed `withdraw_funds` artifact is shown below. The other capabilities follow the same structure, with differences in their inputs, actions, and expected outcomes.
 {
       "schema_version": 1,                // Tracks changes to the artifact's format
@@ -34,7 +34,7 @@ A minimal fragment of a reviewed `withdraw_funds` artifact is shown below. The o
     }
 A successful discovery run does not automatically become a trusted artifact. New artifacts start as `draft` because discovery may not always correctly determine which values should become reusable inputs or which page elements an action should use. A human reviews these decisions before the artifact is approved for replay. This review happens once, when the artifact is built not on every replay run.The final artifact stores the reusable workflow, not the specific values from that run. A reviewed workflow cannot be changed without giving it a new `capability_version`. If replay is given an older version, it refuses to run instead of silently using a newer workflow. This makes changes explicit and prevents unexpected behavior.
 
-3. Determinism & Error Handling
+## Determinism & Error Handling
 Given the same artifact and inputs, replay performs the same actions in the same order every time. The application's data can still change between runs, so replay is deterministic about the procedure, not the final result for example, the same withdrawal for the same member may succeed today but return insufficient_funds later if the member's balance has changed. The same principle applies to errors: the system responds based on what actually went wrong, rather than treating every problem as an automation failure.
 
 **If the caller provides an invalid value**, such as a withdrawal method that the page does not offer, the run fails immediately and reports the valid options. Retrying cannot make an invalid input valid.
@@ -43,16 +43,16 @@ Given the same artifact and inputs, replay performs the same actions in the same
 **If an action appears to fail**, such as a timeout, the system first checks whether the application actually completed it. A known case is handled automatically; if the result is still unclear, a human can inspect the live page. 
 **If the problem remains unresolved**, the system gives the same step one final retry, re-finding the element and re-checking its safety before trying it again. The outcome is checked once more before recording a structured failure.
 
-4. Heterogeneity & Multi-tenant
+## Heterogeneity & Multi-tenant
 Only two parts of the system are browser-specific, observing the page and performing actions. Decision-making, safety checks, outcome verification, human handoffs, and logging works with the information those parts provide, regardless of the underlying surface. Supporting a desktop or legacy application would therefore mainly require replacing those two parts rather than rebuilding the core pipeline. The same principle carries over to different tenants, but the boundary shifts: instead of a browser-specific component absorbing the variation, it's the artifact itself. The system doesn't automatically detect or adapt to differences between tenants' workflows that judgment happens during human artifact review, and gets recorded as a separate `capability_version`. A caller can optionally pin the `capability_version` it expects; if it does, replay refuses to run against a different version rather than silently assuming compatibility. A caller that doesn't pin one just gets whatever version the artifact currently is.
 
-5. Escalation & Handoff
+## Escalation & Handoff
 The system stops and asks a human whenever it has observable evidence that continuing isn't safe, rather than trying to detect "confusion" with one complex mechanism. The flow has three parts: what triggers a handoff, how the human actually steps in, and what happens once they're done.
 **Detection** - A handoff triggers when the page stops changing across several attempts, the run exceeds its step/time budget, the model explicitly says it can't safely continue, the goal can't be mapped to a known capability, or a monetary action is at or above the approval threshold. These are different failure modes, but all get the same response: ask a human rather than guess.
 **Intervention** - The human gets control of the exact same live browser window the automation was just driving, so nothing is copied or transferred, and the human can act on the page directly for example, if a lookup was missing its `member_id`, the human can type it into the field themselves. Once the human approves the change, automation resumes from whatever state the page is now in.
 **Follow-up** - Once the flow resumes, the system re-observes the live page and runs the same outcome checks it would after any automated step, so the human's action isn't trusted blindly either. A before-and-after snapshot is recorded around the handoff, not a full click-by-click trace, since that is not really needed to check what change human intervention did. An explicit human abort is logged separately from an unresolved automation failure.
 
-6. Safety
+## Safety
 A decision to act, whether the LLM proposes it in discovery, or an artifact step supplies it in replay, never becomes a browser action automatically. Every action passes through the same deterministic guardrail first, which checks two things before letting anything execute: is this action even part of what the current capability is permitted to do, and if it involves money withdrawal, is the amount below the approval threshold. If either check fails, the action never happens. This is the same guardrail code in both modes; only who's proposing the action differs.
 
 **During discovery:**
@@ -65,7 +65,7 @@ A decision to act, whether the LLM proposes it in discovery, or an artifact step
 - There's no progress-hash check here; replay's failure modes (grounding drift, a blocked action, an execution failure) are instead handled by the layered recovery process described in Determinism & Error Handling.
 
 
-7. Cuts
+## Cuts
 Several limitations are intentionally deferred because the current system does not yet justify their complexity; others are genuine extensions as the system grows.
 **New capability setup:** Checkpoints which tell what counts as success or a known outcome are currently written manually by a human for trust, so adding a new capability means writing those for each new capability. Future tooling could instead draft candidate checkpoints from an actual discovery run's observed pages, leaving a human to just review and approve them rather than write them blind. With only 3 capabilities so far, this cost hasn't been felt yet, but it won't scale as more are added.
 **Comparing valid paths:** Discovery step currently follows the first sensible path rather than comparing alternatives. With three capabilities there is little reason to explore alternatives; as institutional customization creates multiple valid routes, discovery step should compare them and prefer the more efficient or safer one.
