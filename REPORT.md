@@ -15,7 +15,7 @@ A minimal fragment of a reviewed `withdraw_funds` artifact is shown below. The o
       "capability_version": 1,            //  Tracks changes to the workflow itself
       "goal_key": "withdraw_funds",       // tells what underlying goal is being trying to achieved
       "parameters": ["member_id"],        // inputs the caller must supply to run this capability
-      "status" : "draft" / "reviewed"     // change status from draft to review once all steps in artifact are checked for correctness
+      "status" : "draft"                  // change status to review once all steps in artifact are checked for correctness
       "steps": [{
         "action": "type",                 // the browser action to perform - type, click, select, hover, etc.
         "value": {"param": "member_id"},  // value to use - here, substitute the caller's member_id parameter
