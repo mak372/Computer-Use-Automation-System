@@ -28,6 +28,13 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 
+# The replay step below needs artifacts/lookup_balance.json to already be
+# "status": "reviewed" - it ships that way in this repo. Discovery's own
+# auto-save will NOT overwrite an already-reviewed artifact with a fresh
+# draft, so this is safe to re-run; but if that committed artifact is ever
+# deleted, discovery will only produce a draft, and replay will then refuse
+# to run it (by design - drafts require real human review, and this script
+# deliberately does not bypass that).
 echo "==> Running discovery: 'Look up member M-1001 and report their balance.'"
 echo "    (a real browser window will open - this step calls the LLM and may pause"
 echo "    for human input at http://127.0.0.1:5050 if the run needs it)"

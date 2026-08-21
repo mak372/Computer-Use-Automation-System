@@ -4,7 +4,30 @@ A goal-driven browser automation agent with two modes: **discovery**, where an L
 
 See `REPORT.md` for the full design write-up (architecture, artifact schema, safety model, and known limitations).
 
-## Setup
+## Quickstart (one command)
+
+Installs dependencies, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact.
+
+Needs `.env` with `GEMINI_API_KEY` set first — discovery calls the LLM (replay doesn't). Create a `.env` file in the project root:
+```
+GEMINI_API_KEY=your-key-here
+```
+
+On Windows, in PowerShell:
+```
+.\demo.ps1
+```
+On macOS/Linux, or Windows Git Bash:
+```
+./demo.sh
+```
+On Windows, don't run `demo.sh` via a bare `bash demo.sh` if you also have WSL installed — `bash` on your `PATH` may resolve to WSL's bash instead of Git Bash, which runs against a completely separate Linux Python environment (and will fail with an "externally-managed-environment" pip error). Use `demo.ps1` instead, or launch a Git Bash terminal directly (right-click the folder → "Git Bash Here") rather than typing `bash` from PowerShell.
+
+A real browser window opens during the discovery step; if the run needs human input it'll pause and prompt in the terminal (and at `http://127.0.0.1:5050`), same as running the commands manually.
+
+The replay step relies on `artifacts/lookup_balance.json` already being committed with `"status": "reviewed"` in this repo — discovery's auto-save never overwrites an already-reviewed artifact with a fresh draft, so the two steps don't conflict. Replay always refuses to run a draft artifact by design (drafts require real human review); the script never bypasses that.
+
+## Manual setup (if you'd rather not run the script)
 
 1. **Install dependencies**
    ```
@@ -14,7 +37,7 @@ See `REPORT.md` for the full design write-up (architecture, artifact schema, saf
 
 2. **Set your Gemini API key** (only needed for discovery, not replay — see below)
 
-   Create a `.env` file in the project root:
+   Create a `.env` file in the project root with content given below by putting your own gemini api key:
    ```
    GEMINI_API_KEY=your-key-here
    ```
@@ -29,27 +52,13 @@ That's the only "live service" this project talks to besides the LLM — `target
 
 ## Running without the LLM
 
-**Replay never calls the LLM and never needs `GEMINI_API_KEY`.** It executes a fixed, previously human-reviewed artifact (see `artifacts/*.json`) deterministically. If you just want to see the automation actually work without setting up an API key, skip straight to the replay command in the demo path below — the three capability artifacts already committed in `artifacts/` are ready to replay.
+**Replay never calls the LLM and never needs `GEMINI_API_KEY`.** It executes a fixed, previously human-reviewed artifact (see `artifacts/*.json`) deterministically. If you just want to see the automation actually work without setting up an API key, skip straight to the replay command in the manual demo path below — the three capability artifacts already committed in `artifacts/` are ready to replay.
 
 Discovery (`agent.main`) does require a real `GEMINI_API_KEY`, since an LLM call is what decides each action.
 
-## Demo path
+## Manual demo path
 
-**One command, does everything below:** installs dependencies, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact.
-
-On Windows, in PowerShell:
-```
-.\demo.ps1
-```
-On macOS/Linux, or Windows Git Bash:
-```
-./demo.sh
-```
-On Windows, don't run `demo.sh` via a bare `bash demo.sh` if you also have WSL installed — `bash` on your `PATH` may resolve to WSL's bash instead of Git Bash, which runs against a completely separate Linux Python environment (and will fail with an "externally-managed-environment" pip error). Use `demo.ps1` instead, or launch a Git Bash terminal directly (right-click the folder → "Git Bash Here") rather than typing `bash` from PowerShell.
-
-Needs `.env` with `GEMINI_API_KEY` set first (see Setup above) — discovery calls the LLM. A real browser window opens during the discovery step; if the run needs human input it'll pause and prompt in the terminal (and at `http://127.0.0.1:5050`), same as running the commands manually.
-
-Or, step by step, with `target_app` running in one terminal, in another terminal:
+With `target_app` running in one terminal, in another terminal:
 
 **1. Run discovery on a natural-language goal** (requires `GEMINI_API_KEY`):
 ```
@@ -74,4 +83,4 @@ python -m agent.main --goal "Open a new sub-account for member M-1001."
 python -m agent.main_replay --goal-key open_sub_account --param member_id=M-1001 --param nickname=Vacation --param initial_deposit=500
 ```
 
-
+Evidence (a structured JSONL log plus screenshots) for every run, discovery or replay, is written to `evidence/{run_id}/`.
