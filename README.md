@@ -1,8 +1,4 @@
-# interface-ai
-
-A goal-driven browser automation agent with two modes: **discovery**, where an LLM figures out how to complete a natural-language goal against a live web app, and **replay**, where a previously discovered and human-reviewed procedure is executed deterministically, with no LLM involved.
-
-See `REPORT.md` for the full design write-up (architecture, artifact schema, safety model, and known limitations).
+# Steps to run 
 
 **Prerequisites:** Python 3.10+ (tested on 3.13), and `git` to clone this repo. Everything else (Flask, Playwright, Chromium, etc.) is installed by the steps below.
 
