@@ -1,21 +1,4 @@
-"""Lightweight local web console for HITL escalations (Section 3.6).
-
-Runs a small Flask app in a background daemon thread, started lazily on
-the first escalation and kept alive for the rest of the process. This is a
-genuinely additive surface, not a replacement for operator.py's terminal
-prompt - whichever surface the human answers first resolves the block (see
-operator.py's module docstring for the shared-queue race mechanism that
-makes that safe: exactly one decision is ever consumed, so there's never
-ambiguity about who actually took the action).
-
-Deliberately NOT a co-browsing console (out of scope per the brief's own
-Section 3.6 scope note) - this module never touches the live Playwright
-`page` at all, only displays already-captured context (goal/step/trigger/
-reason/amount/screenshot) and captures a button click. The real live
-browser session a human takes over to actually act is the already-open,
-non-headless Chromium window this whole system drives - unchanged from the
-terminal-only mock this extends.
-"""
+"""Lightweight local web console for HITL escalations"""
 
 from __future__ import annotations
 

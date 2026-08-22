@@ -1,12 +1,4 @@
-"""Loop controller: the observe -> decide -> act orchestrator (decision #6),
-tying together perception, guardrails, action_executor, llm_client,
-checkpoints, operator, and logger.
-
-This is the discovery-time driver - an LLM proposes each action. The
-replay engine (not yet built) will reuse perception/guardrails/
-action_executor/logger/checkpoints identically, swapping this module out
-for deterministic, pre-recorded action selection.
-"""
+"""Loop controller"""
 
 from __future__ import annotations
 

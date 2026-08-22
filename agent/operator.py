@@ -1,26 +1,4 @@
-"""Mock human-operator surface (decision #6/#8 HITL implementation).
-
-Section 3.6 explicitly allows mocking the operator UI as long as the
-handoff mechanism and control-transfer model are real. Two surfaces are
-live for every escalation: the original blocking terminal prompt, and a
-small local web console (agent/operator_ui.py). Neither surface ever
-touches the live Playwright `page` - the mechanism that's real is that the
-harness pauses issuing Playwright commands, the browser window stays open
-and interactive (non-headless) so a human genuinely can act on the live
-session, and whichever surface the human answers first supplies the
-decision that unblocks it.
-
-The race is what keeps "who is in control" unambiguous despite two input
-surfaces: both a terminal-reading thread and the web console are handed
-the *same* single-slot queue, exactly one decision is ever consumed, and
-the other surface's pending input is simply abandoned (the terminal thread
-is a daemon thread; an extra stdin line or a stray button click after the
-race is already decided is a harmless no-op, not a competing action). This
-also means the web console is a genuinely optional convenience, not a new
-point of failure: if operator_ui's Flask server fails to start for any
-reason (port in use, etc.), the terminal path is completely unaffected and
-this behaves exactly as it did before that module existed.
-"""
+"""Mock human-operator surface"""
 
 from __future__ import annotations
 

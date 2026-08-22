@@ -1,16 +1,4 @@
 """Gemini wrapper: tool schema, prompt construction, retry policy.
-
-Decisions #1 (Gemini 2.5 Flash), #4 (action schema - every LLM tool call
-carries a required `reasoning` field), #5 (system instruction set once,
-compact text-only history + full current observation, single-turn calls
-built fresh from run-log state rather than an accumulating SDK chat
-object), #6 (retry-once on timeout), #9 (model_version captured for
-run_start, failed attempts surfaced for llm_call_attempt_failed logging).
-
-Interactive elements are numbered [1], [2]... (valid click/type/select
-targets). Static text is numbered separately as [S1], [S2]... - a distinct
-namespace used only by `finish` to reference where an output value was
-read from, so it can never be confused with an action target.
 """
 
 from __future__ import annotations
@@ -141,23 +129,6 @@ _TOOLS = [
     )
 ]
 
-# A separate, one-shot tool call made before the observe/decide loop starts
-# (see loop_controller.run_discovery) - the model picks which
-# checkpoints.REGISTRIES entry this goal maps to, from a fixed enum, instead
-# of a human supplying --goal-key on the CLI. Kept as its own tool/call
-# rather than folded into the 5 step-loop actions above: capability
-# selection is a one-time decision made from the goal text alone, before any
-# page has even been observed, not a per-step browser action.
-# "unsupported" is a deliberate escape hatch, not a real capability - it lets
-# the model say "none of these fit" instead of being forced to guess the
-# closest-sounding real key (e.g. mapping "calculate EMI" onto
-# lookup_balance because both mention a member). Since "unsupported" is
-# never a key in checkpoints.REGISTRIES, loop_controller.run_discovery's
-# existing goal_key-not-in-REGISTRIES check already treats it as a
-# classification failure and routes it into the same human backup used for
-# an unreachable LLM or a malformed response - no separate handling needed.
-# Public (no leading underscore) since loop_controller imports it directly
-# rather than hardcoding the sentinel string on its own side.
 UNSUPPORTED_GOAL_KEY = "unsupported"
 
 _SELECT_CAPABILITY_SCHEMA = {

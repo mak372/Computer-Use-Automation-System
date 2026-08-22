@@ -1,19 +1,4 @@
-"""Known-interstitial registry for deterministic replay (Section 3.3): a
-data-dependent confirmation page inserted between two steps of an otherwise
-fixed flow (e.g. "this member already has a similar account, proceed?").
-Not a business outcome (checkpoints.py deliberately excludes it - discovery's
-LLM just clicks through it like any other page) and not a terminal state -
-purely a recoverable detour, checked only when a step's recorded grounding
-has already failed to resolve.
-
-Matching follows the same fail-closed discipline as output extraction in
-replay_controller.py (_extract_outputs_from_observation): zero matches and
-multiple matches are both treated as "not recognized," never guessed at - an
-ambiguous match between two registered interstitials is exactly the kind of
-silent-wrong-choice this system refuses to make anywhere else. Not a live
-case today (open_sub_account has exactly one registered entry), but cheap to
-hold to before a second one is ever added.
-"""
+"""Known-interstitial registry for deterministic replay"""
 
 from __future__ import annotations
 

@@ -54,7 +54,7 @@ try {
         Write-Warning "target_app did not respond within 10s - continuing anyway."
     }
 
-    # The replay step below needs artifacts/lookup_balance.json to already be
+    # The replay step below needs evidence/artifacts/lookup_balance.json to already be
     # "status": "reviewed" - it ships that way in this repo. Discovery's own
     # auto-save will NOT overwrite an already-reviewed artifact with a fresh
     # draft, so this is safe to re-run; but if that committed artifact is
@@ -77,7 +77,7 @@ try {
         exit 1
     }
 
-    Write-Host "==> Done. Evidence: evidence/  Artifact: artifacts/lookup_balance.json"
+    Write-Host "==> Done. Evidence: evidence/  Artifact: evidence/artifacts/lookup_balance.json"
 }
 finally {
     if ($targetProc -and -not $targetProc.HasExited) {

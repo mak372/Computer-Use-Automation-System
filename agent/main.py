@@ -1,20 +1,3 @@
-"""CLI entry point.
-
-Usage:
-    python -m agent.main --goal "Look up member M-1001 and report their balance."
-    python -m agent.main --goal "..." --target http://127.0.0.1:5001
-
-Runs one genuine LLM-driven discovery run against a live target application
-(default: config.TARGET_BASE_URL, overridable with --target) and writes
-structured evidence (JSONL log + screenshots) to evidence/{run_id}/. The
-capability (checkpoints.REGISTRIES key) is no longer supplied by the
-caller - run_discovery's own first move is an LLM call
-(LLMClient.classify_goal_key) that picks it from the goal text alone, so
-this CLI's only required input is the natural-language goal itself.
-Requires that target running separately (python target_app/app.py) and a
-real GEMINI_API_KEY in .env.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -94,13 +77,6 @@ def main() -> int:
     print(f"Evidence: {config.EVIDENCE_DIR}/{result.run_id}/")
 
     if result.outcome_type == "success":
-        # Section 3.2: "after a successful run, emit ... an artifact" -
-        # automatic, not a separate manual step a human has to remember to
-        # run. build_artifact() itself stays post-hoc/decoupled (reads only
-        # the already-persisted log.jsonl, per decision #1) so a bug here
-        # can't corrupt or invalidate the discovery run that already
-        # succeeded and was already logged - only this auto-save step is
-        # new, wrapped so its failure surfaces as a warning, not a crash.
         try:
             # result.goal_key is always set on a "success" outcome - success
             # can only be reached via checkpoints.verify_finish, which itself

@@ -1,40 +1,4 @@
-"""Replay controller (Section 3.3): deterministic, non-LLM execution of a
-previously-built artifact (agent/artifact_builder.py). Reuses perception.py,
-guardrails.py, action_executor.py, checkpoints.py, logger.py, and
-operator.py exactly as discovery does (see loop_controller.py's own
-docstring) - only the action-selection logic is replaced: instead of an LLM
-deciding what to do next, this module walks a fixed, pre-recorded steps
-list.
-
-This piece: artifact loading + preflight validation + the result contract.
-No live browser/Playwright interaction yet - that's the step-execution loop
-(added next), kept deliberately separate so validation can be built and
-exercised against an artifact file alone, independent of a live target_app.
-
-Preflight order (all before the browser is ever touched, settled in the
-replay design conversation):
-  1. schema_version must match what this build understands - a version
-     mismatch means "I don't know how to safely interpret this file's
-     shape," worse to guess at than to refuse outright.
-  2. status must be "reviewed" - a "draft" artifact's parameter candidacy/
-     naming/typing/description haven't been human-confirmed (artifact_
-     builder.py's own docstring: "nothing here should be trusted").
-  3. If built_from_degraded_log is True, degraded_grounding_reviewed must
-     also be True. status == "reviewed" alone only proves someone reviewed
-     the description - it says nothing about whether they also re-verified
-     a degraded artifact's possibly-wrong-by-default step grounding (nth
-     defaults to 0, which could silently target the wrong element if a
-     real duplicate existed at that step). Both flags gate the same "is
-     this artifact trustworthy" question, not two unrelated concerns.
-  4. If the caller passes expected_capability_version, it must match the
-     artifact's own capability_version - catches a caller relying on a
-     stale understanding of this capability's shape (parameter names/count
-     can differ across a capability_version bump).
-  5. Every declared parameter must be supplied by the caller, no
-     caller-supplied key may be unknown, and each value's shape must match
-     its declared type - fail closed, one clear error before step 1, not a
-     confusing mid-flow app-side failure three steps in.
-"""
+"""Replay controller"""
 
 from __future__ import annotations
 

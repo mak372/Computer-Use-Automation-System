@@ -1,12 +1,12 @@
 # Steps to run 
 
-**Prerequisites:** Python 3.10+ (tested on 3.13), and `git` to clone this repo. Everything else (Flask, Playwright, Chromium, etc.) is installed by the steps below.
+**Prerequisites:** Python 3.10+ and `git` to clone this repo. Everything else (Flask, Playwright, Chromium, etc.) is installed by the steps below.
 
 ## Quickstart (one command)
 
-Creates a virtual environment (`.venv`), installs dependencies into it, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact.
+Creates a virtual environment (`.venv`), installs dependencies into it, installs the Chromium browser, starts `target_app`, runs discovery on one goal, then replays the resulting artifact. This script only exercises the lookup_balance capability. See the Manual demo path below to try discovery and replay for withdraw_funds and open_sub_account.
 
-Needs `.env` with `GEMINI_API_KEY` set first, discovery calls the LLM (replay doesn't). Create a `.env` file in the project root:
+Needs `.env` with `GEMINI_API_KEY` set first, discovery calls the LLM (replay doesn't). Create a `.env` file in the project root with following content:
 ```
 GEMINI_API_KEY=your-key-here
 ```
@@ -50,13 +50,19 @@ A real browser window opens during the discovery step; if the run needs human in
    ```
    Runs on `http://127.0.0.1:5000`.
 
-That's the only "live service" this project talks to besides the LLM  `target_app` is a local Flask app made for mocking the surface UI.
+That's the only "live service" this project talks to besides the LLM. `target_app` is a local Flask app made for mocking the surface UI.
 
-## Running without the LLM
+Since this is a mock platform, only the following member IDs exist. Any `member_id` parameter used below must be one of these:
+- `M-1001` (active, balance 3000)
+- `M-1002` (restricted)
+- `M-1003` (active, balance 2000)
+- `M-1005` (active, balance 4000)
+- `M-1006` (active, balance 6000)
+- `M-1007` (active, balance 100000)
+- `M-1010` (active, balance 8000)
+- `M-1098` (active, balance 1000 — for testing session-expiry behavior)
+- `M-1099` (active, balance 1500 — for testing a broken/error page)
 
-**Replay never calls the LLM and never needs `GEMINI_API_KEY`.** It executes a fixed, previously human-reviewed artifact (see `artifacts/*.json`) deterministically. If you just want to see the automation actually work without setting up an API key, skip straight to the replay command in the manual demo path below the three capability artifacts already committed in `artifacts/` are ready to replay.
-
-Discovery (`agent.main`) does require a real `GEMINI_API_KEY`, since an LLM call is what decides each action.
 
 ## Manual demo path
 
@@ -97,7 +103,7 @@ python -m agent.main --goal "Withdraw 150 from member M-1001's account."
 python -m agent.main_replay --goal-key withdraw_funds --param member_id=M-1001 --param amount=150 --param withdrawal_method=transfer
 
 python -m agent.main --goal "Open a new sub-account for member M-1001."
-python -m agent.main_replay --goal-key open_sub_account --param member_id=M-1001 --param nickname=Vacation --param initial_deposit=500
+python -m agent.main_replay --goal-key open_sub_account --param member_id=M-1001 --param nickname=Vacation
 ```
 
 Evidence (a structured JSONL log plus screenshots) for every run, discovery or replay, is written to `evidence/{run_id}/`.

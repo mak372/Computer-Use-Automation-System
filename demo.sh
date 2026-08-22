@@ -39,7 +39,7 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 
-# The replay step below needs artifacts/lookup_balance.json to already be
+# The replay step below needs evidence/artifacts/lookup_balance.json to already be
 # "status": "reviewed" - it ships that way in this repo. Discovery's own
 # auto-save will NOT overwrite an already-reviewed artifact with a fresh
 # draft, so this is safe to re-run; but if that committed artifact is ever
@@ -54,4 +54,4 @@ echo "    for human input at http://127.0.0.1:5050 if the run needs it)"
 echo "==> Replaying the resulting artifact (no LLM call)"
 "$VENV_PY" -m agent.main_replay --goal-key lookup_balance --param member_id=M-1001
 
-echo "==> Done. Evidence: evidence/  Artifact: artifacts/lookup_balance.json"
+echo "==> Done. Evidence: evidence/  Artifact: evidence/artifacts/lookup_balance.json"

@@ -1,10 +1,4 @@
-"""In-memory data model and seed data for the simulated legacy bank app.
-
-Each seeded member exists to deterministically trigger one specific
-scenario used by the discovery run and replay demos (see REPORT.md).
-M-9999 is intentionally NOT seeded — it represents the "member not found"
-business outcome.
-"""
+"""In-memory data model and seed data for the simulated legacy bank app."""
 
 from dataclasses import dataclass, field
 

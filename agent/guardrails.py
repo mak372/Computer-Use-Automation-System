@@ -1,17 +1,4 @@
 """Guardrail enforcement: allowlist + risk tiering + amount provenance.
-
-Layer 2 risk tiering was originally amount-size-only (amount >= threshold
--> hitl_required). A real discovery run surfaced a gap that pure size
-tiering can't catch: a goal that never actually states a dollar amount at
-all, where the LLM types a small guessed placeholder instead of
-escalating - a guessed $100 would sail through auto-approve untouched,
-even though its provenance is exactly as unverified as an untraceable
-$50,000 would be. Layer 2a below closes that: an amount is only eligible
-for auto-approval if it can be traced back to a figure the goal itself
-declared, regardless of size. An untraceable amount is routed to
-hitl_required rather than blocked outright, since a human may well glance
-at it and clear it in seconds - the same review lane the size threshold
-already uses, not a new terminal failure mode. See REPORT.md.
 """
 
 from __future__ import annotations

@@ -1,15 +1,4 @@
-"""Structured JSONL run logging + evidence storage (decision #9).
-
-One run = one directory under EVIDENCE_DIR, named after the run:
-  evidence/{run_id}/log.jsonl
-  evidence/{run_id}/step_{n}.png   (only for steps that captured a screenshot)
-
-Shared by discovery and replay - both produce logs through this same module
-so /evidence/ contains directly comparable output for either run type.
-
-Callers must pass plain JSON-serializable dicts (str/int/float/bool/None/
-list/dict) into the log_* methods - dataclass instances and Playwright
-Locator objects are not serializable and must be converted first.
+"""Structured JSONL run logging + evidence storage.
 """
 
 from __future__ import annotations

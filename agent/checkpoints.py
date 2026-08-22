@@ -1,53 +1,10 @@
-"""Checkpoint / outcome verification (decision #7).
-
+"""
 Never trust the LLM's self-report of `finish`. Every claimed outcome is
 checked against a hand-authored, per-goal registry of (URL pattern, static
 text signature) - the terminal states of target_app are fully known since
 we wrote it. For a success outcome specifically, the referenced output
 values are also re-extracted from the actual observation text (via known,
 exact-template regexes) rather than trusted from the LLM's own transcription.
-
-This same signature registry is what the artifact's checkpoint (Section
-3.2/3.3) will reuse for deterministic replay verification later.
-
-Still excluded from every registry: the similar-account interstitial
-(recoverable, agent clicks through it - not a terminal state at all), and
-the "broken page" / system-error state (a hard failure the agent should
-escalate on, not report as a completed goal - leaving it unregistered
-means a finish() claiming it gets rejected, enforcing the business-
-outcome-vs-hard-failure distinction structurally rather than only via
-prompting).
-
-Form validation errors ARE now registered, though - a real correction
-from this module's earlier position (which excluded them all as "the
-agent corrects and retries"). That reasoning only ever held for
-discovery: an LLM that sees "Amount must be a positive number." can
-retype a valid amount and carry on. Replay has no such option - its
-steps are fixed, and a bad value can only ever have come from what the
-caller supplied as a parameter (see replay_controller.bind_parameters,
-which only checks type shape, e.g. "is this a number," not business rules
-like positivity). Before these were registered, a caller-supplied
-negative amount or empty nickname would fall through to the same
-unclassified "checkpoint drift" a genuinely broken app would produce -
-technically safe (nothing wrong ever executes silently; the run still
-eventually escalates to a human via the checkpoint-drift fallback) but
-misleading and slow to diagnose, exactly the misreporting insufficient_
-funds below was already fixed for. Same fix, same reasoning, just for the
-sibling failure shape the brief explicitly names ("a validation error" -
-Section 3.3) that the first fix didn't yet cover.
-
-`insufficient_funds` (withdraw_funds registry) was the first validation-
-error-shaped state registered, and deliberately so: unlike a data-entry
-mistake (a malformed amount, a bad member ID format) which a human or an
-LLM could plausibly correct by retrying, insufficient funds is a fact
-about the account's real state that no retry - human or automated - can
-fix within this run. It is therefore a legitimate terminal business
-outcome for replay to report, exactly like member_not_found, rather than
-a recoverable condition. This distinction was sharpened after a real
-replay run hit exactly this state and, before this entry existed,
-misreported it as checkpoint/grounding drift - a misleading label
-implying the app had structurally changed, when it had behaved exactly
-as designed (see REPORT.md).
 """
 
 from __future__ import annotations
@@ -72,15 +29,6 @@ def _extract_balance(refs: list[str]) -> dict:
 def _extract_sub_account_created(refs: list[str]) -> dict:
     if not refs:
         raise ValueError("success outcome requires at least one output_ref")
-    # Greedy `.+` (not `[^"]+`) for the nickname group: a nickname containing
-    # a literal `"` (e.g. Mom's "Special" Fund) renders HTML-escaped in the
-    # template source, but Playwright's text extraction decodes it back to a
-    # literal quote before this regex ever sees it - a negated-quote class
-    # would truncate the capture there and fail the whole match on a
-    # genuinely successful creation. Backtracking from a greedy `.+` finds
-    # the correct (rightmost) boundary instead. account_type is anchored to
-    # the app's actual two <option> values (sub_account_form.html), not
-    # `[^)]+`, to remove any residual ambiguity in where that boundary is.
     match = re.search(
         r'Sub-account "(.+)" \((savings|checking)\) created successfully '
         r"with an initial deposit of \$([\d,]+\.\d{2})",
@@ -116,14 +64,6 @@ class OutcomeSpec:
     # referenced static-text strings, returns typed outputs, or raises
     # ValueError if the text doesn't actually match the expected shape.
     output_extractor: Optional[Callable[[list[str]], dict]] = None
-    # Declared return shape of output_extractor, e.g. {"balance": "number"}.
-    # Colocated with output_extractor (not a separate lookup table) so the
-    # two can't silently drift apart - this is the authoritative source for
-    # the artifact schema's `outputs` field (Section 3.2): the extractor's
-    # author already knows its real return types (e.g. deposit_amount is
-    # always float(...) in _extract_sub_account_created below, deliberately,
-    # not incidentally), so the artifact should read that declared shape
-    # rather than re-infer types from one recorded run's observed values.
     output_schema: Optional[dict[str, str]] = None
 
 
@@ -228,10 +168,6 @@ def verify_finish(
 
     referenced_texts = []
     for ref in output_refs:
-        # Defensive: Gemini's function-calling response has been observed
-        # returning array items as strings (e.g. "2") even though the tool
-        # schema declares them as integers - not something callable from
-        # this side of the API, so coerce rather than trust the type.
         try:
             ref_int = int(ref)
         except (TypeError, ValueError):

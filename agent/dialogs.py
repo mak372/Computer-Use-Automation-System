@@ -1,24 +1,5 @@
 """Known-dialog registry for native browser dialogs (window.confirm/alert/
-prompt) - Section 3.3's "unexpected dialog" runtime condition.
-
-Playwright's own default (no listener registered) is to silently
-auto-dismiss any dialog. That's a real failure mode worth naming explicitly:
-an action that legitimately needs a dialog accepted to proceed would just
-silently not happen - the triggering click still "succeeds" (no exception),
-the page simply never changes, and there is no evidence anywhere explaining
-why. Registering a handler closes two separate gaps at once: a *known*
-dialog gets actively accepted so the legitimate flow can proceed at all
-(without this, that flow is structurally broken, not just unobserved), and
-an *unknown* dialog's message/type get logged before it's dismissed, so a
-resulting stall is debuggable instead of a silent no-op.
-
-Same fail-closed discipline as interstitials.py: a dialog message matching
-exactly one registered pattern for this goal is accepted (the browser-native
-equivalent of "dismiss a known interstitial" - a recoverable condition, not
-a guess). Zero or multiple matches means "not a dialog recognized as safe" -
-dismissed, and the resulting unchanged page surfaces through the normal
-grounding/checkpoint machinery as a hard failure with real diagnostic detail
-attached, exactly like any other unrecognized state in this system.
+prompt)
 """
 
 from __future__ import annotations

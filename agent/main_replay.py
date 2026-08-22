@@ -1,17 +1,3 @@
-"""Replay CLI entry point.
-
-Usage:
-    python -m agent.main_replay --goal-key withdraw_funds --param member_id=M-1007 --param amount=150
-    python -m agent.main_replay --goal-key withdraw_funds --param amount=150 --target http://127.0.0.1:5001
-
-Runs one deterministic replay of a previously-built, human-reviewed
-artifact (agent/artifact_builder.py output, artifacts/{goal_key}.json)
-against a live target application (default: config.TARGET_BASE_URL,
-overridable with --target) - no LLM call anywhere in this path, unlike
-python -m agent.main. Requires that target running separately
-(python target_app/app.py). No GEMINI_API_KEY needed.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -46,7 +32,7 @@ def main() -> int:
         "--goal-key",
         required=True,
         choices=sorted(REGISTRIES.keys()),
-        help="Which artifact (artifacts/{goal_key}.json) to replay.",
+        help="Which artifact (evidence/artifacts/{goal_key}.json) to replay.",
     )
     parser.add_argument(
         "--param",
@@ -71,13 +57,6 @@ def main() -> int:
 
     parameters = dict(args.param)
 
-    # Fail fast, before ever launching a browser: preflight is cheap and
-    # pure (one file read, no I/O beyond that), so checking it here first
-    # avoids opening Chromium for a run that was always going to be
-    # refused. run_replay() below re-validates internally regardless - this
-    # is purely a CLI-experience shortcut, not a substitute for that (any
-    # other caller invoking run_replay() directly still gets the real
-    # guarantee without needing to know to call this first).
     try:
         artifact = load_artifact(args.goal_key)
         validate_artifact_preflight(artifact, args.expected_capability_version)

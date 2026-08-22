@@ -1,9 +1,5 @@
 """Action execution: role-validated, timeout-bounded Playwright calls.
 
-Decision #3 (grounding is a stored Locator, not a re-query) + decision #4
-(role validation before execution, structured results instead of raw
-Playwright exceptions surfacing to the LLM).
-
 Guardrail evaluation (agent.guardrails) and index/staleness resolution both
 happen in the loop controller before this module is ever called -
 execute_action assumes the caller has already decided this exact action is

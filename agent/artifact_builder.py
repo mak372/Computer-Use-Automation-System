@@ -1,55 +1,8 @@
-"""Artifact builder (Section 3.2): turns a successful discovery run's
-evidence/{run_id}/log.jsonl into a versioned, reviewable capability
-definition, written to artifacts/{goal_key}.json.
-
-Deliberately post-hoc, not built inline into loop_controller.py's success
+"""Deliberately post-hoc, not built inline into loop_controller.py's success
 path: reads only the already-persisted log, never live Playwright/LLM
 objects, so a bug here can never corrupt or block a run that already
 succeeded, and so it can be developed/tested against the evidence/ runs
-already on disk without spending any more LLM quota (see config.py /
-PROGRESS.md decision #1).
-
-Schema shape (settled by design conversation, not re-derived here):
-  - Two audiences: a calling agent reads only the top-level contract
-    (parameters / outputs / checkpoint); a human reviewer or the future
-    replay engine reads the full `steps` list plus `grounding_strategy`.
-  - Every `type`/`select` step becomes a candidate parameter (name from
-    the element's accessible label, type seeded from the app's own
-    declared <input type> and falling back to shape-inference); every
-    `click` stays a literal, structural action. This is a draft: `status`
-    starts "draft" and a human is expected to review/correct parameter
-    candidacy and write the real `description` before treating the
-    artifact as final - nothing here should be trusted as reviewed.
-  - `checkpoint`'s url_pattern/text_signature are copied from
-    checkpoints.REGISTRIES at build time and become the artifact's own
-    frozen, authoritative copy for replay matching - REGISTRIES is never
-    re-consulted for the match condition, only for output_extractor /
-    output_schema (the one piece that can't serialize), keyed by
-    (goal_key, outcome). This includes every OTHER outcome in the goal's
-    registry too (checkpoint.known_outcomes), not just success - so replay
-    can distinguish a legitimate business outcome (member_not_found,
-    restricted, ...) from genuine checkpoint drift (the final page matches
-    nothing the artifact recognizes at all), the same business-outcome-vs-
-    failure distinction checkpoints.py already enforces in discovery.
-  - `degraded_grounding_reviewed` closes a gap `built_from_degraded_log`
-    alone left open: `status: "reviewed"` only proves a human looked at
-    parameter candidacy/naming/typing/description (decision #4) - it says
-    nothing about whether they also re-verified a degraded artifact's
-    possibly-wrong-by-default grounding (nth defaults to 0, which could
-    silently target the wrong element if a real duplicate existed at that
-    step). Defaults to False whenever built_from_degraded_log is True, and
-    must be hand-flipped to True by whoever reviews the artifact - not by
-    this builder - once they've actually re-checked step grounding, not
-    just the description.
-  - Nothing sensitive/literal is persisted: parameters carry no raw
-    recorded example value, and any expected_target path segment that
-    exactly matches a known parameter's recorded value is templated back
-    to {param_name} before being written out.
-  - `built_from_degraded_log` self-flags an artifact built from a
-    pre-instrumentation log (missing nth/effective_target/html_input_type
-    on a step target, or missing goal_key on run_start) so degraded
-    provenance is visible in the artifact itself, not something to track
-    externally by run_id.
+already on disk without spending any more LLM quota 
 """
 
 from __future__ import annotations
@@ -171,17 +124,7 @@ def _promote_identifier_params(
     any step's own clicked name). Requiring both narrows this specifically
     to "a human/LLM clicked the literal value that also threads through
     this resource's URLs" - a strong, if not airtight, signal of a
-    variable identifier.
-
-    This is a heuristic, not a proof: a goal with a genuinely fixed-label
-    button whose name happens to coincide with a recurring route segment
-    (e.g. a "Home" button on a path containing "/home/" more than once)
-    would false-positive under this rule. Acceptable because, like every
-    other auto-derived field here, the result lands in a "draft" artifact
-    a human must review before it can run - never shipped silently. See
-    also _check_unparameterized_wildcard_checkpoint, the build-time
-    sanity check for the opposite failure (a per-record checkpoint with
-    nothing parameterized at all).
+    variable identifier..
     """
     path_segment_step_indices: dict[str, set[int]] = {}
     for raw in raw_steps:
@@ -258,7 +201,7 @@ def _check_unparameterized_wildcard_checkpoint(checkpoint: dict, steps: list[dic
     a click deeper in the flow).
 
     A clean pass here is not proof the artifact is correctly parameterized
-    overall - only that neither of these two known failure shapes is
+    overall only that neither of these two known failure shapes is
     present. A flow whose first step types an unrelated field while its
     real identifying click stays hardcoded elsewhere would still slip
     through undetected - a residual gap of this being a cheap heuristic,
@@ -386,11 +329,6 @@ def build_artifact(
                 known_values[param_name] = str(recorded_value)
             value_field = {"param": param_name}
 
-        # Kept raw (untemplated) here, not turned into expected_target yet:
-        # identifier promotion below needs to see every step's full,
-        # untemplated path before it can tell whether a value recurs across
-        # the whole run - a step in the middle of the run can't know that on
-        # its own, in a single forward pass.
         method, bare_path = None, None
         if raw_effective_target:
             method, raw_path = raw_effective_target
@@ -424,15 +362,6 @@ def build_artifact(
         if raw["bare_path"] is not None:
             expected_target = [raw["method"], _template_path(raw["bare_path"], known_values)]
 
-        # If this step's own literal name is a promoted identifier, replace
-        # it with the same {param_name} placeholder convention used above
-        # for expected_target path segments - this is the field
-        # relocate_step_element() actually locates by
-        # (get_by_role(role, name=name)), unlike expected_target, which is
-        # drift-detection only (see GROUNDING_STRATEGY_NOTE). Scoped to
-        # identifier_values specifically, not all of known_values, so a
-        # typed parameter's value can never accidentally re-template an
-        # unrelated click step's name.
         step_name = raw["name"]
         for param_name, value in identifier_values.items():
             if step_name == value:
@@ -522,7 +451,7 @@ def save_artifact(
     repo_root: Path | None = None,
     force: bool = False,
 ) -> tuple[Path, bool]:
-    """Writes artifact to artifacts/{goal_key}.json, unless an artifact
+    """Writes artifact to evidence/artifacts/{goal_key}.json, unless an artifact
     already there is status: "reviewed" and force is False - a reviewed
     artifact represents completed human review work (decision #4/#12) that
     an automatic rebuild (main.py, after every successful discovery run)
