@@ -68,7 +68,7 @@ Since this is a mock platform, only the following member IDs exist. Any `member_
 
 With `target_app` running in one terminal, in another terminal:
 
-**1. Run discovery on a natural-language goal** (requires `GEMINI_API_KEY`):
+### 1. Run discovery on a natural-language goal** (requires `GEMINI_API_KEY`):
 ### Command parameters
 
 **Discovery** (`python -m agent.main`):
@@ -80,15 +80,15 @@ A small operator console also starts at `http://127.0.0.1:5050` it stays idle un
 
 A freshly auto-built artifact starts as `"status": "draft"` replay refuses to run a draft artifact. The three artifacts already committed in this repo have been manually reviewed and marked `"status": "reviewed"`; if you build a new one from your own discovery run, edit its `status` field to `"reviewed"` before replaying it.
 
-**Rebuilding an artifact that already exists for a capability:** discovery won't auto-overwrite one that's already `"reviewed"` — it just skips saving and tells you so. To rebuild it on purpose:
+**Rebuilding an artifact that already exists for a capability:** discovery won't auto-overwrite one that's already `"reviewed"` it just skips saving and tells you so. To rebuild it on purpose:
 ```
 python -m agent.artifact_builder <run_id> --goal-key <goal_key> --capability-version <N>
 ```
 - `<run_id>` is the evidence folder your discovery run just created, e.g. `evidence/2026-08-21T160512Z-lookup_balance/` → `run_id` is `2026-08-21T160512Z-lookup_balance`.
-- `<N>` must be a different number from the existing artifact's current `capability_version` — the rebuild is refused otherwise, so a caller pinned to the old version doesn't silently get different behavior.
+- `<N>` must be a different number from the existing artifact's current `capability_version` the rebuild is refused otherwise, so a caller pinned to the old version doesn't silently get different behavior.
 - The rebuilt artifact is written as `"status": "draft"` again, so it still needs a human to review it and flip `status` to `"reviewed"` before replay will use it.
 
-**2. Replay the resulting artifact** (no API key needed):
+### 2. Replay the resulting artifact** (no API key needed):
 ### Command parameters
 **Replay** (`python -m agent.main_replay`):
 - `--goal-key` (required) - which artifact to replay: `lookup_balance`, `withdraw_funds`, or `open_sub_account`.
