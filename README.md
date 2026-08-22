@@ -105,7 +105,7 @@ python -m agent.main_replay --goal-key lookup_balance --param member_id=M-1001
 ```
 This drives the same browser flow again, but deterministically no LLM, just the recorded steps re-executed against the live target app and verified against the artifact's recorded checkpoint.
 
-Other supported goals, if you want to try discovery → replay for each:
+Other supported goals, if you want to try  examples for discovery and replay for each a few of them are given below:
 ```
 python -m agent.main --goal "Withdraw 150 from member M-1001's account."
 python -m agent.main_replay --goal-key withdraw_funds --param member_id=M-1001 --param amount=150 --param withdrawal_method=transfer
